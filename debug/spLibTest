@@ -1,0 +1,5 @@
+CREATE PROCEDURE dbo.spLibTest
+AS
+BEGIN
+    SELECT '1'
+END

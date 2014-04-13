@@ -1,0 +1,6 @@
+CREATE PROCEDURE dbo.spLibTest12
+AS
+BEGIN
+    /* This is comment */
+    SELECT '12' -- MSSQL
+END
