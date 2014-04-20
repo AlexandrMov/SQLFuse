@@ -3,46 +3,69 @@
 #include "tsqlcheck.h"
 
 struct tsql_checker {
-  struct tsql_node *node;
+  objnode_t *node;
   GMutex lock;
 };
 
-struct tsql_checker checker;
+struct tsql_checker *checker;
+
+void init_checker()
+{
+  if (!checker) {
+    checker = g_try_new0(struct tsql_checker, 1);
+    g_mutex_init(&checker->lock);
+  }
+}
 
 int start_checker()
 {
-  g_mutex_init(&checker.lock);
-  g_mutex_lock(&checker.lock);
+  if (!checker->node)
+    checker->node = g_try_new0(objnode_t, 1);
+  
+  g_mutex_lock(&checker->lock);
 }
 
-int put_node(unsigned int type, char *schema, char *objname)
+int put_node(unsigned int type, char *schema, char *objname,
+	     int fc, int fl, int lc, int ll)
 {
-  if (!checker.node)
-    checker.node = g_try_new0(struct tsql_node, 1);
+  if (!checker->node)
+    checker->node = g_try_new0(objnode_t, 1);
 
-  if (checker.node) {
-    if (schema)
-      checker.node->schema = g_strdup(schema);
+  if (checker->node) {
+    checker->node->first_line = fl;
+    checker->node->first_column = fc;
+    checker->node->last_line = ll;
+    checker->node->last_column = lc;
     
-    checker.node->objname = g_strdup(objname);
-    checker.node->type = type;
+    if (schema)
+      checker->node->schema = g_strdup(schema);
+    
+    checker->node->objname = g_strdup(objname);
+    checker->node->type = type;
   }
 
   return 0;
 }
 
-struct tsql_node *get_node() {
-  return checker.node;
+objnode_t *get_node() {
+  return checker->node;
 }
 
 int end_checker()
 {
-  if (checker.node->schema)
-    g_free(checker.node->schema);
+  if (checker->node->schema)
+    g_free(checker->node->schema);
   
-  g_free(checker.node->objname);
-  g_mutex_unlock(&checker.lock);
-  g_mutex_clear(&checker.lock);
+  g_free(checker->node->objname);
+  g_free(checker->node);
+
+  g_mutex_unlock(&checker->lock);
 
   return 0;
+}
+
+void close_checker()
+{
+  g_mutex_clear(&checker->lock);
+  g_free(checker);
 }

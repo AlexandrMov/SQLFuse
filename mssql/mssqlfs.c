@@ -1,15 +1,14 @@
 #include <string.h>
 
 #include "mssqlfs.h"
+#include "exec.h"
 #include "tsqlcheck.h"
 #include "tsql.tab.h"
-
 
 struct cache {
   GHashTable *objtypes, *datatypes;
   
-  int multithreads;
-  GSList *ctxlist;
+  int multithreads;  
 };
 
 static struct cache cache;
@@ -98,11 +97,6 @@ static int msg_handler(DBPROCESS *dbproc, DBINT msgno, int msgstate, int severit
   }
   g_printerr("%s\n", msgtext);
   
-  if (severity > 10) {
-    g_printerr("error: severity %d > 10, exiting\n", severity);
-    exit(severity);
-  }
-  
   return 0;
 }
 
@@ -138,148 +132,12 @@ static char *trimwhitespace(char *str)
   return str;
 }
 
-static inline int init_mscontext(const struct sqlctx *ctx)
+int init_msctx(struct sqlctx *ctx)
 {
-  int error = 0;
-
-  struct mscontext *context = g_try_new0(struct mscontext, 1);
-  
-  if ((context->login = dblogin()) == NULL) {
-    g_printerr("%s:%d: unable to allocate login structure\n",
-	       ctx->appname, __LINE__);
-    error = 10;
-  }
-  
-  if (!error) {
-    DBSETLNATLANG(context->login, "russian");
-    DBSETLUSER(context->login, ctx->username);
-    DBSETLPWD(context->login, ctx->password);
-    DBSETLAPP(context->login, ctx->appname);
-  }
-  
-  if (!error
-      && (context->dbproc = dbopen(context->login, ctx->servername)) == NULL) {
-    g_printerr("%s:%d: unable to connect to %s as %s\n",
-	       ctx->appname, __LINE__,
-	       ctx->servername, ctx->username);
-    error = 11;
-  }
-  
-  RETCODE erc;
-  if (!error && ctx->dbname
-      && (erc = dbuse(context->dbproc, ctx->dbname)) == FAIL) {
-    g_printerr("%s:%d: unable to use to database %s\n",
-	       ctx->appname, __LINE__, ctx->dbname);
-    error = 12;
-  }
-
-  if (!error) {
-    g_mutex_init(&context->lock);
-    cache.ctxlist = g_slist_append(cache.ctxlist, context);
-  }
-  
-  return error;
-}
-
-int init_msctx(struct sqlctx *ctx, gpointer err_handler,
-	       gpointer msg_handler)
-{
-  if (!ctx)
-    return 1;
-
-  if (!ctx->appname || !ctx->servername
-      || !ctx->username || !ctx->dbname) {
-    return 1;
-  }
-  
-  RETCODE erc;
-  if (dbinit() == FAIL) {
-    g_printerr("%s:%d: dbinit() failed\n",
-	    ctx->appname, __LINE__);
-    return 1;
-  }
-  
-  if (!err_handler)
-    dberrhandle(err_handler);
-  if (!msg_handler)
-    dbmsghandle(msg_handler);
-
-  int i, error;
-  for (i = 0; i < ctx->maxconn; i++) {
-    error = init_mscontext(ctx);
-    
-    if (error) {
-      g_printerr("Error #%d", error);
-      exit(error);
-      break;
-    }
-  }
-
+  int error = init_context(ctx, err_handler, msg_handler);
   initobjtypes();
-
-  return 0;
-}
-
-static int do_exec_sql(const char *sql, const struct mscontext *ctx)
-{
-  if (!sql || !ctx)
-    return ;
-
-  int error = 0;
+  init_checker();
   
-  if (!error && (dbcmd(ctx->dbproc, sql) == FAIL)) {
-    g_printerr("%d: dbcmd() failed\n", __LINE__);
-    error = 2;
-  }
-  
-  if (!error && (dbsqlexec(ctx->dbproc) == FAIL)) {
-    g_printerr("%d: dbsqlexec() failed\n", __LINE__);
-    error = 3;
-  }
-  
-  if (!error && (dbresults(ctx->dbproc) == FAIL)) {
-    g_printerr("%d: dbresults() failed\n", __LINE__);
-    error = 4;
-  }
-
-  return error;
-}
-
-static inline int exec_sql(const char *sql, struct mscontext **context)
-{
-  gboolean lock;
-  int error = 0, i, len = g_slist_length(cache.ctxlist);
-  GSList *list = cache.ctxlist;
-  struct mscontext *ctx = NULL;
-  for (i = 0; i < len; i++) {
-    error = 0;
-    ctx = list->data;
-    lock = g_mutex_trylock(&ctx->lock);
-    g_message("isdead: %d\n", dbdead(ctx->dbproc));
-    if (lock && ctx) {
-      if (!do_exec_sql(sql, ctx))
-	break;
-      
-      g_message("Error #%d: %s, %d", error, sql, i);
-      g_mutex_unlock(&ctx->lock);
-    }
-    
-    list = g_slist_next(list);
-  }
-  
-  if (!ctx || !lock) {
-    list = cache.ctxlist;
-    if (list && list->data) {
-      ctx = list->data;
-      g_mutex_lock(&ctx->lock);
-    } else {
-      g_printerr("no connections!");
-    }
-  }
-
-  if (ctx)
-    *context = ctx;
-
   return error;
 }
 
@@ -300,7 +158,7 @@ static int load_datatypes()
   g_string_append(sql, ", is_nullable, is_table_type");
   g_string_append(sql, " FROM sys.types");
 
-  struct mscontext *ctx = NULL;
+  msctx_t *ctx = NULL;
   error = exec_sql(sql->str, &ctx);
 
   if (!error) {
@@ -355,7 +213,7 @@ static int load_datatypes()
     g_free(cltname);
   }
 
-  g_mutex_unlock(&ctx->lock);
+  close_sql(ctx);
   g_string_free(sql, TRUE);
   
   return error;
@@ -367,7 +225,7 @@ int find_ms_object(const struct sqlfs_ms_obj *parent,
   int error = 0;
 
   if (!name)
-    return -1;
+    return EENULL;
 
   RETCODE erc;
   GString * sql = g_string_new(NULL);
@@ -409,7 +267,7 @@ int find_ms_object(const struct sqlfs_ms_obj *parent,
     }
   }
 
-  struct mscontext *ctx = NULL;
+  msctx_t *ctx = NULL;
   error = exec_sql(sql->str, &ctx);
 
   if (!error) {
@@ -460,32 +318,34 @@ int find_ms_object(const struct sqlfs_ms_obj *parent,
     g_free(name_buf);
   }
 
-  g_mutex_unlock(&ctx->lock);  
+  close_sql(ctx);
   g_string_free(sql, TRUE);
   
-  return -error;
+  return error;
 }
 
 int write_ms_object(const char *schema, const struct sqlfs_ms_obj *parent,
 		    const char *text, struct sqlfs_ms_obj *obj)
 {
   if (!obj || !obj->name || !text)
-    return 1;
+    return EENULL;
 
   int error = 0;
   start_checker();
+
   yy_scan_string(text);
   error = yyparse();
-  struct tsql_node *node = get_node();
-  
-  if (!error && node) {
-    GString *sql = g_string_new(NULL);
+  objnode_t *node = NULL;
+  if (!error && ((node = get_node()) != NULL)) {
 
+    char *wrktext = NULL;
+    GString *sql = g_string_new(NULL);
     if (node->type == COLUMN) {
       if (!parent || !parent->name) {
-	error = 11;
+	error = EENULL;
       }
       else {
+	wrktext = g_strdup(text + node->first_column - 1);
 	g_string_append_printf(sql, "ALTER TABLE %s.%s", schema, parent->name);
 	if (obj->object_id) {
 	  g_string_append(sql, " ALTER COLUMN ");
@@ -496,13 +356,19 @@ int write_ms_object(const char *schema, const struct sqlfs_ms_obj *parent,
 	g_string_append_printf(sql, "%s ", obj->name);
       }
     }
+    else {
+      wrktext = g_strdup(text);
+    }
+      
 
-    if (!error)
-      g_string_append_printf(sql, "%s", text);
+    if (!error) {
+      g_string_append_printf(sql, "%s", wrktext);
+    }
     
-    struct mscontext *ctx = NULL;
+    msctx_t *ctx = NULL;
     error = exec_sql(sql->str, &ctx);
     if (!error) {
+      
       switch(node->type) {
       case COLUMN:
 	obj->type = R_COL;
@@ -525,8 +391,11 @@ int write_ms_object(const char *schema, const struct sqlfs_ms_obj *parent,
 	obj->type = R_P;
       }
     }
-    g_mutex_unlock(&ctx->lock);
+    
+    close_sql(ctx);
+    g_free(wrktext);
     g_string_free(sql, TRUE);
+    
   }
   
   end_checker();
@@ -538,7 +407,7 @@ int remove_ms_object(const char *schema, const char *parent,
 		     struct sqlfs_ms_obj *obj)
 {
   if (!obj || !schema)
-    return 1;
+    return EENULL;
   
   int error = 0;
   GString *sql = g_string_new(NULL);
@@ -567,16 +436,16 @@ int remove_ms_object(const char *schema, const char *parent,
       g_string_append(sql, "PROCEDURE");
       break;
     default:
-      error = 2;
+      error = EENOTSUP;
     }
     
     g_string_append_printf(sql, " %s.%s", schema, obj->name);
   }
 
   if (!error) {
-    struct mscontext *ctx = NULL;
+    msctx_t *ctx = NULL;
     error = exec_sql(sql->str, &ctx);
-    g_mutex_unlock(&ctx->lock);
+    close_sql(ctx);
   }
 
   g_string_free(sql, TRUE);
@@ -587,7 +456,7 @@ int remove_ms_object(const char *schema, const char *parent,
 int load_module_text(const char *parent, struct sqlfs_ms_obj *obj, char **text)
 {
   if (!obj || !parent)
-    return 1;
+    return EENULL;
 
   int error = 0;
   char *def = NULL;
@@ -599,7 +468,7 @@ int load_module_text(const char *parent, struct sqlfs_ms_obj *obj, char **text)
     GString *sql = g_string_new(NULL);
     
     g_string_append_printf(sql, "EXEC sp_helptext '%s.%s'", parent, obj->name);
-    struct mscontext *ctx = NULL;
+    msctx_t *ctx = NULL;
     error = exec_sql(sql->str, &ctx);
 
     if (!error) {
@@ -629,13 +498,13 @@ int load_module_text(const char *parent, struct sqlfs_ms_obj *obj, char **text)
       def = g_strdup(sql->str);
     }
     
-    g_mutex_unlock(&ctx->lock);
+    close_sql(ctx);
     g_string_free(sql, TRUE);
   }
 
   *text = def;
   
-  return -error;
+  return error;
 }
 
 static void make_column_def(const struct sqlfs_ms_obj *obj, char **text)
@@ -645,7 +514,7 @@ static void make_column_def(const struct sqlfs_ms_obj *obj, char **text)
 
   struct sqlfs_ms_column *col = obj->column;
   GString *def = g_string_new(NULL);
-  g_string_append_printf(def, "%s", col->type_name);
+  g_string_append_printf(def, "COLUMN %s", col->type_name);
   
   if (!g_strcmp0(col->type_name, "float"))
     g_string_append_printf(def, "(%d)", col->precision);
@@ -673,7 +542,7 @@ static void make_column_def(const struct sqlfs_ms_obj *obj, char **text)
 int load_table_obj(const struct sqlfs_ms_obj *tbl, GList **obj_list)
 {
   if (!tbl)
-    return 1;
+    return EENULL;
 
   int error = 0;
   RETCODE erc;
@@ -686,7 +555,7 @@ int load_table_obj(const struct sqlfs_ms_obj *tbl, GList **obj_list)
   g_string_append(sql, " ON st.user_type_id = sc.user_type_id");
   g_string_append_printf(sql, " WHERE sc.object_id = %d", tbl->object_id);
 
-  struct mscontext *ctx = NULL;
+  msctx_t *ctx = NULL;
   error = exec_sql(sql->str, &ctx);
 
   DBINT col_id_buf, type_id_buf, mlen, precision, scale, nullable,
@@ -746,7 +615,7 @@ int load_table_obj(const struct sqlfs_ms_obj *tbl, GList **obj_list)
     }
   }
 
-  g_mutex_unlock(&ctx->lock);
+  close_sql(ctx);
   g_free(typename_buf);
   g_free(colname_buf);
 
@@ -817,7 +686,7 @@ int load_table_obj(const struct sqlfs_ms_obj *tbl, GList **obj_list)
     }
   }
 
-  g_mutex_unlock(&ctx->lock);
+  close_sql(ctx);
   g_free(trgname_buf);
   g_string_free(sql, TRUE);
   
@@ -827,7 +696,7 @@ int load_table_obj(const struct sqlfs_ms_obj *tbl, GList **obj_list)
 int load_schema_obj(const struct sqlfs_ms_obj *sch, GList **obj_list)
 {
   if (!sch)
-    return 1;
+    return EENULL;
 
   int error = 0;
   RETCODE erc;
@@ -841,7 +710,7 @@ int load_schema_obj(const struct sqlfs_ms_obj *sch, GList **obj_list)
   g_string_append_printf(sql, " WHERE schema_id = %d", sch->schema_id);
   g_string_append(sql, " AND parent_object_id = 0");
 
-  struct mscontext *ctx = NULL;
+  msctx_t *ctx = NULL;
   error = exec_sql(sql->str, &ctx);
 
   DBINT obj_id_buf;
@@ -890,11 +759,12 @@ int load_schema_obj(const struct sqlfs_ms_obj *sch, GList **obj_list)
   }
 
   *obj_list = lst;
-  g_mutex_unlock(&ctx->lock);
+  
+  close_sql(ctx);
   g_string_free(sql, TRUE);
   g_free(name_buf);
 
-  return 0;
+  return error;
 }
 
 int load_schemas(GList **obj_list)
@@ -903,7 +773,7 @@ int load_schemas(GList **obj_list)
   RETCODE erc;
   gchar * sql = "SELECT schema_id, name FROM sys.schemas";
 
-  struct mscontext *ctx = NULL;
+  msctx_t *ctx = NULL;
   error = exec_sql(sql, &ctx);
 
   int rowcode;
@@ -934,10 +804,11 @@ int load_schemas(GList **obj_list)
   }
 
   *obj_list = lst;
-  g_mutex_unlock(&ctx->lock);
+  
+  close_sql(ctx);
   g_free(schname_buf);
   
-  return 0;
+  return error;
 }
 
 void free_ms_obj(gpointer msobj)
@@ -975,4 +846,15 @@ void free_ms_obj(gpointer msobj)
 
   g_free(obj->name);
   g_free(obj);
+}
+
+int close_msctx()
+{
+  int error = 0;
+
+  close_checker();
+  error = close_context();
+  dbexit();
+  
+  return error;
 }

@@ -5,10 +5,10 @@ struct sqlcache {
   GHashTable *cache_table, *temp_table, *open_table;
 };
 
-struct sqlfs_file {
+typedef struct {
   gchar *buffer;
   int flush;
-};
+} sqlfs_file_t;
 
 #define FUSE_USE_VERSION 26
 #include <fuse.h>
@@ -62,7 +62,7 @@ static int find_object(const char *pathname, struct sqlfs_ms_obj **object)
   if (pn == NULL)
     pn = pathname;
   
-  gchar **tree = g_strsplit(pn, "/", -1);
+  gchar **tree = g_strsplit(pn, G_DIR_SEPARATOR_S, -1);
   if (tree == NULL)
     return 0;
 
@@ -76,7 +76,7 @@ static int find_object(const char *pathname, struct sqlfs_ms_obj **object)
   
   if (!obj) {
     while(*tree) {
-      g_string_append_printf(path, "%s%s", "/", *tree);
+      g_string_append_printf(path, "%s%s", G_DIR_SEPARATOR_S, *tree);
       err = 0;
       obj = g_hash_table_lookup(cache.cache_table, path->str);
       if (!obj) {
@@ -124,7 +124,7 @@ static int sqlfs_getattr(const char *path, struct stat *stbuf)
 {
   int err = 0;
   memset(stbuf, 0, sizeof(struct stat));
-  if (g_strcmp0(path, "/") == 0) {
+  if (g_strcmp0(path, G_DIR_SEPARATOR_S) == 0) {
     stbuf->st_mode = S_IFDIR | 0755;
     stbuf->st_nlink = 2;
   } else {
@@ -158,7 +158,7 @@ static int sqlfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   filler(buf, "..", NULL, 0);
 
   int err = 0;
-  int nschema = g_strcmp0(path, "/");
+  int nschema = g_strcmp0(path, G_DIR_SEPARATOR_S);
   GList *wrk = NULL;
   struct sqlfs_ms_obj *object = NULL;
   if (!nschema) {
@@ -182,7 +182,7 @@ static int sqlfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   while (wrk) {
     object = wrk->data;
     filler(buf, object->name, NULL, 0);
-    str = (nschema) ? g_strjoin("/", path, object->name, NULL)
+    str = (nschema) ? g_strjoin(G_DIR_SEPARATOR_S, path, object->name, NULL)
       : g_strconcat(path, object->name, NULL);
     if (!g_hash_table_contains(cache.cache_table, str)) {
       g_mutex_lock(&cache.m);
@@ -214,7 +214,7 @@ static int sqlfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 static int sqlfs_read(const char *path, char *buf, size_t size,
 		      off_t offset, struct fuse_file_info *fi)
 {
-  struct sqlfs_file *fsfile = g_hash_table_lookup(cache.open_table, &(fi->fh));
+  sqlfs_file_t *fsfile = g_hash_table_lookup(cache.open_table, &(fi->fh));
   if (!fsfile && !fsfile->buffer)
     return 0;
   
@@ -261,7 +261,7 @@ static int sqlfs_mknod(const char *path, mode_t mode, dev_t rdev)
   if ((mode & S_IFMT) != S_IFREG)
     return -EPERM;
   
-  gchar **parent = g_strsplit(g_path_skip_root(path), "/", -1);
+  gchar **parent = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
   if (parent == NULL)
     err = -EFAULT;
 
@@ -325,13 +325,13 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
 
   if (!err) {
     fi->fh = object->object_id;
-    gchar **schema = g_strsplit(g_path_skip_root(path), "/", -1);
+    gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
     if (schema == NULL)
       err = -EFAULT;
 
     char *def = NULL;
     if (!err && !load_module_text(*schema, object, &def)) {
-      struct sqlfs_file *fsfile = g_try_new0(struct sqlfs_file, 1);
+      sqlfs_file_t *fsfile = g_try_new0(sqlfs_file_t, 1);
       uint64_t *pfh = g_malloc0(sizeof(uint64_t));
       *pfh = fi->fh;
       if (def) {
@@ -351,7 +351,7 @@ static int sqlfs_write(const char *path, const char *buf, size_t size,
 		       off_t offset, struct fuse_file_info *fi)
 {
   int err = 0;
-  struct sqlfs_file *fsfile = g_hash_table_lookup(cache.open_table, &(fi->fh));
+  sqlfs_file_t *fsfile = g_hash_table_lookup(cache.open_table, &(fi->fh));
   if (fsfile && fsfile->buffer) {
     size_t len = strlen(fsfile->buffer);
     if (len < size + offset)
@@ -369,7 +369,7 @@ static int sqlfs_write(const char *path, const char *buf, size_t size,
 static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
 {
   int err = 0;
-  struct sqlfs_file *fsfile = g_hash_table_lookup(cache.open_table, &(fi->fh));
+  sqlfs_file_t *fsfile = g_hash_table_lookup(cache.open_table, &(fi->fh));
   if (!fsfile)
     err = -ENOENT;
   
@@ -378,7 +378,7 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
     return 0;
   }
     
-  gchar **schema = g_strsplit(g_path_skip_root(path), "/", -1);
+  gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
   if (schema == NULL)
     err = -EFAULT;
 
@@ -412,7 +412,7 @@ static int sqlfs_unlink(const char *path)
 {
   int err = 0;
 
-  gchar **schema = g_strsplit(g_path_skip_root(path), "/", -1);
+  gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
   if (schema == NULL)
     err = -EFAULT;
 
@@ -458,7 +458,7 @@ static int sqlfs_truncate(const char *path, off_t offset)
 
 static void free_sqlfs_file(gpointer pointer)
 {
-  struct sqlfs_file *fsfile = (struct sqlfs_file *) pointer;
+  sqlfs_file_t *fsfile = (sqlfs_file_t *) pointer;
   g_free(fsfile->buffer);
   g_free(fsfile);
 }
@@ -504,7 +504,7 @@ int main (int argc, char **argv)
   if (fuse_opt_parse(&args, msctx, sqlfs_opts, sqlfs_opt_proc) == -1)
     exit(1);
 
-  if (init_msctx(msctx, NULL, NULL)) {
+  if (init_msctx(msctx)) {
     exit(1);
   }
   g_free(msctx->appname);
@@ -512,8 +512,8 @@ int main (int argc, char **argv)
   
   res = sqlfs_fuse_main(&args);
   fuse_opt_free_args(&args);
-  
-  dbexit();
+
+  close_msctx();
   g_mutex_clear(&cache.m);
   
   return res;

@@ -33,8 +33,8 @@ static int do_exec_sql(const char *sql, const msctx_t *ctx)
   return error;
 }
 
-int init_context(const struct sqlctx *sqlctx, gpointer err_handler,
-		 gpointer msg_handler)
+int init_context(const struct sqlctx *sqlctx,
+		 gpointer err_handler, gpointer msg_handler)
 {
   if (!sqlctx)
     return EENULL;
@@ -50,6 +50,9 @@ int init_context(const struct sqlctx *sqlctx, gpointer err_handler,
     return EEINIT;
   }
 
+  dberrhandle(err_handler);
+  dbmsghandle(msg_handler);
+
   if (!ectx) {
     ectx = g_try_new0(exectx_t, 1);
     ectx->ctx = g_try_new0(struct sqlctx, 1);
@@ -63,48 +66,52 @@ int init_context(const struct sqlctx *sqlctx, gpointer err_handler,
   else
     error = EEMEM;
 
-  int i;
-  msctx_t *msctx = NULL;
-  for (i = 0; i < sqlctx->maxconn; i++) {
-    msctx = g_try_new0(msctx_t, 1);
+  if (!error) {
+
+    int i;
+    msctx_t *msctx = NULL;
+    for (i = 0; i < sqlctx->maxconn; i++) {
+      msctx = g_try_new0(msctx_t, 1);
     
-    if ((msctx->login = dblogin()) == NULL) {
-      g_printerr("%s:%d: unable to allocate login structure\n",
-		 ctx->appname, __LINE__);
-      error = EELOGIN;
-    }
-
-    if (!error) {
-      DBSETLNATLANG(msctx->login, "russian");
-      DBSETLUSER(msctx->login, sqlctx->username);
-      DBSETLPWD(msctx->login, sqlctx->password);
-      DBSETLAPP(msctx->login, sqlctx->appname);
-
-      if ((msctx->dbproc = dbopen(msctx->login, msctx->servername)) == NULL) {
-	g_printerr("%s:%d: unable to connect to %s as %s\n",
-		   msctx->appname, __LINE__,
-		   msctx->servername, msctx->username);
-	error = EECONN;
+      if ((msctx->login = dblogin()) == NULL) {
+	g_printerr("%s:%d: unable to allocate login structure\n",
+		   sqlctx->appname, __LINE__);
+	error = EELOGIN;
       }
 
-      if (!error && msctx->dbname
-	  && (erc = dbuse(msctx->dbproc, sqlctx->dbname)) == FAIL) {
-	g_printerr("%s:%d: unable to use to database %s\n",
-		   sqlctx->appname, __LINE__, sqlctx->dbname);
-	error = EEUSE;
+      if (!error) {
+	DBSETLNATLANG(msctx->login, "english");
+	DBSETLUSER(msctx->login, sqlctx->username);
+	DBSETLPWD(msctx->login, sqlctx->password);
+	DBSETLAPP(msctx->login, sqlctx->appname);
+
+	if ((msctx->dbproc = dbopen(msctx->login, sqlctx->servername)) == NULL) {
+	  g_printerr("%s:%d: unable to connect to %s as %s\n",
+		     sqlctx->appname, __LINE__,
+		     sqlctx->servername, sqlctx->username);
+	  error = EECONN;
+	}
+
+	if (!error && sqlctx->dbname
+	    && (erc = dbuse(msctx->dbproc, sqlctx->dbname)) == FAIL) {
+	  g_printerr("%s:%d: unable to use to database %s\n",
+		     sqlctx->appname, __LINE__, sqlctx->dbname);
+	  error = EEUSE;
+	}
+      }
+
+      if (!error) {
+	g_mutex_init(&msctx->lock);
+	ectx->ctxlist = g_slist_append(ectx->ctxlist, msctx);
       }
     }
-
-    if (!error) {
-      g_mutex_init(&msctx->lock);
-      cache.ctxlist = g_slist_append(ectx->ctxlist, msctx);
-    }
+    
   }
 
   return error;
 }
 
-int exec_sql(const char *sql, msctx_t *msctx)
+int exec_sql(const char *sql, msctx_t **msctx)
 {
   int error = 0;
 
@@ -134,7 +141,7 @@ int exec_sql(const char *sql, msctx_t *msctx)
 	}
 	
 	if (!error && ectx->ctx->dbname
-	    && (erc = dbuse(ctx->dbproc, ectx->ctx->dbname)) == FAIL) {
+	    && (erc = dbuse(wrkctx->dbproc, ectx->ctx->dbname)) == FAIL) {
 	  g_printerr("%s:%d: unable to use to database %s\n",
 		     ectx->ctx->appname, __LINE__,
 		     ectx->ctx->dbname);
@@ -156,22 +163,53 @@ int exec_sql(const char *sql, msctx_t *msctx)
 
   if (!wrkctx || !lock) {
     list = ectx->ctxlist;
+    
     if (list && list->data) {
       wrkctx = list->data;
       g_mutex_lock(&wrkctx->lock);
-    } else {
-      g_printerr("no connections!");
+      if (do_exec_sql(sql, wrkctx))
+	error = EERES;
     }
+    
   }
+
+  if (!error)
+    *msctx = wrkctx;
   
   return error;
 }
 
-void close_sql(const msctx_t *context)
+void close_sql(msctx_t *context)
 {
+  if (!context)
+    return ;
+
+  g_mutex_unlock(&context->lock);
 }
 
-void close_context()
+int close_context()
 {
+  int error = 0;
+  int i, len = g_slist_length(ectx->ctxlist);
+  msctx_t *wrkctx = NULL;
+  GSList *list = ectx->ctxlist;
+  RETCODE erc;
+  gboolean lock;
+  
+  for (i = 0; i < len; i++) {
+    if ((wrkctx = list->data) != NULL) {
+      
+      lock = g_mutex_trylock(&wrkctx->lock);
+      if (lock) {
+	dbclose(wrkctx->dbproc);
+      }
+      else {
+	error = EEBUSY;
+      }
+      
+    }
+    list = g_slist_remove(list, wrkctx);
+  }
 
+  return error;
 }

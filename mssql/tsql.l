@@ -4,11 +4,20 @@
 
 #include "tsql.tab.h"
 
-void yyerror(char *s);
+int yycolumn = 1;
 
+#define YY_USER_ACTION yylloc.first_line = yylloc.last_line = yylineno; \
+    yylloc.first_column = yycolumn; yylloc.last_column = yycolumn + yyleng - 1; \
+    yycolumn += yyleng;
+
+void yyerror(char *s);
 %}
+
+%option yylineno
+
 %%
 
+COLUMN		{ return COLUMN; }
 CONTENT		{ return CONTENT; }
 DOCUMENT	{ return DOCUMENT; }
 FILESTREAM	{ return FILESTREAM; }
@@ -38,14 +47,13 @@ ON		{ return ONX; }
 [0-9]+		{ yylval.ival = atoi(yytext); return INTNUM; }
 
 [-+*/(),.;]	return yytext[0];
-"--".*$		{
-		/* skip comment */
-		}
+"--".*$		{ yycolumn = 1; /* skip comment */ }
 [A-Za-z][A-Za-z0-9_]*	{ yylval.sval = strdup(yytext); return NAME; }
 \/\*([^*]|\*[^/])*\*+\/ ; /* skip comment */
 '[^'\n]*$		{ yyerror("Unterminated string"); }
-\n		       	;
+\n		       	{ yycolumn = 1; }
 [ \t\r]+	       	; /* skip whitespaces */
+<<EOF>>			{ yycolumn = 1; yyterminate(); }
 %%
 
 void

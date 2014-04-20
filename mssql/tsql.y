@@ -24,6 +24,7 @@
      return wrapRet;
   }  
 %}
+%locations
 
 %token<sval> NAME
 %token<ival> INTNUM
@@ -47,7 +48,9 @@ input: column_def
 	| func_def
 	| index_def
 {
-	put_node(INDEX, $1->schema, $1->objname);
+	put_node(INDEX, $1->schema, $1->objname,
+		 @1.first_column, @1.first_line,
+	      	 @1.last_column, @1.last_line);
 	YYACCEPT;
 }
 	| trg_def
@@ -58,42 +61,54 @@ input: column_def
 
 proc_def: mk_def PROC obj_name
 {
-	put_node(PROC, $3->schema, $3->objname);
+	put_node(PROC, $3->schema, $3->objname,
+		 @3.first_column, @3.first_line,
+	      	 @3.last_column, @3.last_line);
 	YYACCEPT;
 }
 ;
 
 func_def: mk_def FUNCTION obj_name
 {
-	put_node(FUNCTION, $3->schema, $3->objname);
+	put_node(FUNCTION, $3->schema, $3->objname,
+		 @3.first_column, @3.first_line,
+	      	 @3.last_column, @3.last_line);
 	YYACCEPT;
 }
 ;
 
 trg_def: mk_def TRIGGER obj_name ONX obj_name
 {
-	put_node(TRIGGER, $3->schema, $3->objname);
+	put_node(TRIGGER, $3->schema, $3->objname,
+		 @3.first_column, @3.first_line,
+	      	 @3.last_column, @3.last_line);
 	YYACCEPT;
 }
 ;
 
 view_def: mk_def VIEW obj_name
 {
-	put_node(VIEW, $3->schema, $3->objname);
+	put_node(VIEW, $3->schema, $3->objname,
+		 @3.first_column, @3.first_line,
+	      	 @3.last_column, @3.last_line);
 	YYACCEPT;
 }
 ;
 
 schema_def: mk_def SCHEMA NAME
 {
-	put_node(SCHEMA, NULL, $3);
+	put_node(SCHEMA, NULL, $3,
+		 @3.first_column, @3.first_line,
+	      	 @3.last_column, @3.last_line);
 	YYACCEPT;
 }
 ;
 
 type_def: mk_def TYPE obj_name
 {
-	put_node(TYPE, $3->schema, $3->objname);
+	put_node(TYPE, $3->schema, $3->objname,
+		 @3.first_column, @3.first_line,
+	      	 @3.last_column, @3.last_line);
 	YYACCEPT;
 }
 ;
@@ -126,9 +141,12 @@ mk_def: CREATE
 	| ALTER
 ;
 
-column_def: data_type column_def_opt_list
+column_def: COLUMN data_type column_def_opt_list
 {
-	put_node(COLUMN, $1->schema, $1->objname);
+	put_node(COLUMN, $2->schema, $2->objname,
+		 @2.first_column, @2.first_line,
+	      	 @2.last_column, @2.last_line);
+		 
 	YYACCEPT;
 }
 ;

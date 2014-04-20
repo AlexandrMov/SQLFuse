@@ -42,6 +42,18 @@
 #define D_TEMP 0x11
 #define R_TEMP 0x99
 
+#define EENULL 0x101
+#define EENOTSUP 0x102
+#define EEMEM 0x109
+#define EELOGIN 0x110
+#define EECONN 0x111
+#define EEUSE 0x112
+#define EEINIT 0x113
+#define EEBUSY 0x114
+#define EECMD 0x121
+#define EEXEC 0x122
+#define EERES 0x123
+
 struct sqlctx {
   char *appname;
   char *servername;
@@ -50,12 +62,6 @@ struct sqlctx {
   char *password;
   int maxconn;
   int debug;
-};
-
-struct mscontext {
-  LOGINREC *login;
-  DBPROCESS *dbproc;
-  GMutex lock;
 };
 
 struct sqlfs_ms_type {
@@ -112,7 +118,7 @@ struct sqlfs_ms_obj {
   time_t cached_time;
 };
 
-int init_msctx(struct sqlctx *ctx, gpointer err_handler, gpointer msg_handler);
+int init_msctx(struct sqlctx *ctx);
 
 int find_ms_object(const struct sqlfs_ms_obj *parent,
 		   const char *name, struct sqlfs_ms_obj **obj);
@@ -132,5 +138,7 @@ int remove_ms_object(const char *schema, const char *parent,
 		     struct sqlfs_ms_obj *obj);
 
 void free_ms_obj(gpointer msobj);
+
+int close_msctx();
   
 #endif

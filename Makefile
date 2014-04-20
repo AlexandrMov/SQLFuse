@@ -9,9 +9,9 @@ OBJ_FILES	:= main.o
 
 # MSSQL
 MSSQL_PREFIX	:= ./mssql/
-MSSQL_FILES	:= mssqlfs.c tsqlcheck.c
+MSSQL_FILES	:= mssqlfs.c tsqlcheck.c exec.c
 MSSQL_GEN_FILES	:= tsql.tab.c tsql.parser.c tsql.tab.h
-MSSQL_OBJS	:= tsql.tab.o tsql.parser.o mssqlfs.o tsqlcheck.o
+MSSQL_OBJS	:= tsql.tab.o tsql.parser.o mssqlfs.o tsqlcheck.o exec.o
 SRC_FILES	+= $(addprefix $(MSSQL_PREFIX), $(MSSQL_FILES))
 OBJ_FILES	+= $(addprefix $(MSSQL_PREFIX), $(MSSQL_OBJS))
 MODULES		+= mssql

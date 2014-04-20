@@ -1,18 +1,65 @@
 #ifndef TSQLCHECK_H
 #define TSQLCHECK_H
 
-struct tsql_node {
+/*
+ * Лист синтаксического дерева
+ */
+typedef struct {
   unsigned int type;
-  char *schema;
+  
   char *objname;
-};
+  char *schema;
+  
+  int first_column;
+  int first_line;
+  int last_column;
+  int last_line;
+  
+} objnode_t;
 
+/*
+ *
+ * Инициализация парсера, вызывается однажды
+ *
+ */
+void init_checker();
+
+/*
+ *
+ * Подготовка парсера к работе. После окончания парсинга,
+ * должна вызываться end_checker()
+ *
+ */
 int start_checker();
 
-int put_node(unsigned int type, char *schema, char *objname);
+/*
+ *
+ * Вызывается из парсера, - вставляет найденный
+ * токен в синтаксическое дерево
+ *
+ */
+int put_node(unsigned int type, char *schema, char *objname,
+	     int fc, int fl, int lc, int ll);
 
-struct tsql_node * get_node();
+/*
+ *
+ * Вернёт синтаксическое дерево
+ *
+ */
+objnode_t * get_node();
 
+/*
+ *
+ * Завершение парсинга
+ *
+ */
 int end_checker();
+
+/*
+ *
+ * Освобожение ресурсов, занимаемых парсером. Вызывается однажды.
+ *
+ */
+void close_checker();
 
 #endif
