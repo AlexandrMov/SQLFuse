@@ -162,51 +162,55 @@ static int sqlfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   GList *wrk = NULL;
   struct sqlfs_ms_obj *object = NULL;
   if (!nschema) {
-    load_schemas(&wrk);
+    err = load_schemas(&wrk);
   } else {
     err = find_object(path, &object);
-    if (!object->name)
+    if (!err && !object->name)
       return -ENOENT;
 
     if (object->type == D_SCHEMA) 
-      load_schema_obj(object, &wrk);
+      err = load_schema_obj(object, &wrk);
     else if (object->type == D_U || object->type == D_V) {
-      load_table_obj(object, &wrk);
+      err = load_table_obj(object, &wrk);
     }
     else
       return -ENOENT;
   }
-  
-  wrk = g_list_first(wrk);
-  gchar * str = NULL;
-  while (wrk) {
-    object = wrk->data;
-    filler(buf, object->name, NULL, 0);
-    str = (nschema) ? g_strjoin(G_DIR_SEPARATOR_S, path, object->name, NULL)
-      : g_strconcat(path, object->name, NULL);
-    if (!g_hash_table_contains(cache.cache_table, str)) {
-      g_mutex_lock(&cache.m);
-      g_hash_table_insert(cache.cache_table, str, object);
-      g_mutex_unlock(&cache.m);
-    }
-    wrk = g_list_next(wrk);
-  }
-  g_list_free(wrk);
-  
-  gchar *dir = g_path_get_dirname(path);
-  GHashTableIter iter;
-  gpointer key, value;
 
-  g_mutex_lock(&cache.m);
-  g_hash_table_iter_init(&iter, cache.temp_table);
-  while (g_hash_table_iter_next(&iter, &key, &value)) {
-    if (g_strcmp0(key, dir) == 0 && value) {
-      object = (struct sqlfs_ms_obj *) value;
+  if (!err) {
+    wrk = g_list_first(wrk);
+    gchar * str = NULL;
+    while (wrk) {
+      object = wrk->data;
       filler(buf, object->name, NULL, 0);
+      str = (nschema) ? g_strjoin(G_DIR_SEPARATOR_S, path, object->name, NULL)
+	: g_strconcat(path, object->name, NULL);
+      if (!g_hash_table_contains(cache.cache_table, str)) {
+	g_mutex_lock(&cache.m);
+	g_hash_table_insert(cache.cache_table, str, object);
+	g_mutex_unlock(&cache.m);
+      }
+      wrk = g_list_next(wrk);
     }
+    g_list_free(wrk);
+  
+    gchar *dir = g_path_get_dirname(path);
+    GHashTableIter iter;
+    gpointer key, value;
+
+    g_mutex_lock(&cache.m);
+    g_hash_table_iter_init(&iter, cache.temp_table);
+    while (g_hash_table_iter_next(&iter, &key, &value)) {
+      if (g_strcmp0(key, dir) == 0 && value) {
+	object = (struct sqlfs_ms_obj *) value;
+	filler(buf, object->name, NULL, 0);
+      }
+    }
+    g_mutex_unlock(&cache.m);
+    g_free(dir);
   }
-  g_mutex_unlock(&cache.m);
-  g_free(dir);
+  else if (err == EERES)
+    err = -ECONNABORTED;
   
   return err;
 }
@@ -215,7 +219,7 @@ static int sqlfs_read(const char *path, char *buf, size_t size,
 		      off_t offset, struct fuse_file_info *fi)
 {
   sqlfs_file_t *fsfile = g_hash_table_lookup(cache.open_table, &(fi->fh));
-  if (!fsfile && !fsfile->buffer)
+  if (!fsfile || !fsfile->buffer)
     return 0;
   
   size_t len = strlen(fsfile->buffer);

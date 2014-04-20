@@ -181,7 +181,7 @@ static int load_datatypes()
 
     struct sqlfs_ms_obj *obj = NULL;
     int rowcode;
-    while ((rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
+    while (!error && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
 	obj = g_try_new0(struct sqlfs_ms_obj, 1);
@@ -206,6 +206,7 @@ static int load_datatypes()
 	break;
       case FAIL:
 	g_printerr("%d: dbresults failed\n", __LINE__);
+	error = EERES;
 	break;
       }
     }
@@ -311,6 +312,7 @@ int find_ms_object(const struct sqlfs_ms_obj *parent,
 	break;
       case FAIL:
 	g_printerr("%d: dbresults failed\n",  __LINE__);
+	error = EERES;
 	break;
       }
     }
@@ -479,7 +481,7 @@ int load_module_text(const char *parent, struct sqlfs_ms_obj *obj, char **text)
       DBCHAR def_buf[256];
       dbbind(ctx->dbproc, 1, NTBSTRINGBIND, (DBINT) 0, (BYTE *) def_buf);
     
-      while ((rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
+      while (!error && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
 	switch(rowcode) {
 	case REG_ROW:
 	  g_string_append(sql, def_buf);
@@ -488,14 +490,18 @@ int load_module_text(const char *parent, struct sqlfs_ms_obj *obj, char **text)
 	  break;
 	case FAIL:
 	  g_printerr("%d: dbresults failed\n", __LINE__);
+	  error = EERES;
 	  break;
 	}
-      }  
-
-      module = g_try_new0(struct sqlfs_ms_module, 1);
-      module->def = g_strdup(sql->str);
-      obj->sql_module = module;
-      def = g_strdup(sql->str);
+      }
+      
+      if (!error) {
+	module = g_try_new0(struct sqlfs_ms_module, 1);
+	module->def = g_strdup(sql->str);
+	obj->sql_module = module;
+	def = g_strdup(sql->str);
+      }
+      
     }
     
     close_sql(ctx);
@@ -579,7 +585,7 @@ int load_table_obj(const struct sqlfs_ms_obj *tbl, GList **obj_list)
   int rowcode;
   char *deftext = NULL;
   struct sqlfs_ms_obj * obj = NULL;
-  while ((rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
+  while (!error && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
     switch(rowcode) {
     case REG_ROW:
       obj = g_try_new0(struct sqlfs_ms_obj, 1);
@@ -611,6 +617,7 @@ int load_table_obj(const struct sqlfs_ms_obj *tbl, GList **obj_list)
       break;
     case FAIL:
       g_printerr("%d: dbresults failed\n", __LINE__);
+      error = EERES;
       break;
     }
   }
@@ -618,6 +625,11 @@ int load_table_obj(const struct sqlfs_ms_obj *tbl, GList **obj_list)
   close_sql(ctx);
   g_free(typename_buf);
   g_free(colname_buf);
+
+  if (error) {
+    g_string_free(sql, TRUE);
+    return error;
+  }
 
   g_string_truncate(sql, 0);
   g_string_append(sql, "SELECT so.name, so.object_id, so.type");
@@ -654,7 +666,7 @@ int load_table_obj(const struct sqlfs_ms_obj *tbl, GList **obj_list)
   dbbind(ctx->dbproc, 7, INTBIND, (DBINT) 0, (BYTE *) &def_dc_buf);
   dbbind(ctx->dbproc, 8, INTBIND, (DBINT) 0, (BYTE *) &def_cc_buf);
   struct sqlfs_ms_obj * trgobj = NULL;
-  while ((rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
+  while (!error && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
     switch(rowcode) {
     case REG_ROW:
       trgname_buf = trimwhitespace(trgname_buf);
@@ -682,6 +694,7 @@ int load_table_obj(const struct sqlfs_ms_obj *tbl, GList **obj_list)
       break;
     case FAIL:
       g_printerr("%d: dbresults failed\n", __LINE__);
+      error = EERES;
       break;
     }
   }
@@ -690,7 +703,7 @@ int load_table_obj(const struct sqlfs_ms_obj *tbl, GList **obj_list)
   g_free(trgname_buf);
   g_string_free(sql, TRUE);
   
-  return 0;
+  return error;
 }
 
 int load_schema_obj(const struct sqlfs_ms_obj *sch, GList **obj_list)
@@ -730,7 +743,7 @@ int load_schema_obj(const struct sqlfs_ms_obj *sch, GList **obj_list)
   int rowcode;
   struct sqlfs_ms_obj * obj = NULL;
   GList *lst = NULL;
-  while ((rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
+  while (!error && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
     switch(rowcode) {
     case REG_ROW:
       name_buf = trimwhitespace(name_buf);
@@ -754,6 +767,7 @@ int load_schema_obj(const struct sqlfs_ms_obj *sch, GList **obj_list)
       break;
     case FAIL:
       g_printerr("%d: dbresults failed\n", __LINE__);
+      error = EERES;
       break;
     }
   }
@@ -799,6 +813,7 @@ int load_schemas(GList **obj_list)
       break;
     case FAIL:
       g_printerr("%d: dbresults failed\n", __LINE__);
+      error = EERES;
       break;
     }
   }
