@@ -26,17 +26,20 @@
 %}
 %locations
 
-%token<sval> NAME
+%token<sval> NAME STRING
 %token<ival> INTNUM
 
-%left NOT
+%left '+' '-'
+%left '*' '/'
+%left COMPARISON
 
-%token<ival> CREATE ALTER INDEX UNIQUE FUNCTION
+%token<ival> CREATE ALTER INDEX UNIQUE FUNCTION CONSTRAINT
 %token<ival> CLUSTERED NONCLUSTERED TYPE VIEW SCHEMA TRIGGER
 %token<ival> FILESTREAM COLLATE NULLX ROWGUIDCOL SPARSE
-%token<ival> IDENTITY DOCUMENT CONTENT MAX FOR
-%token<ival> ONX NOT_FOR_REPLICATION COLUMN
-%token<ival> PROCEDURE PROC
+%token<ival> IDENTITY DOCUMENT CONTENT MAX FOR WITH_CHECK
+%token<ival> ONX NOT_FOR_REPLICATION COLUMN NOT WITH_NOCHECK
+%token<ival> PROCEDURE PROC DEFAULT CHECK WITH APPROXNUM
+%token<ival> FOREIGN_KEY REFERENCES PRIMARY_KEY
 
 %type<nodeobj> index_def obj_name data_type clust_idx_def
 
@@ -46,17 +49,49 @@
 input: column_def
         | proc_def
 	| func_def
-	| index_def
+	| constraint_def index_def
 {
-	put_node(INDEX, $1->schema, $1->objname,
-		 @1.first_column, @1.first_line,
-	      	 @1.last_column, @1.last_line);
+	put_node(INDEX, $2->schema, $2->objname,
+		 @2.first_column, @2.first_line,
+	      	 @2.last_column, @2.last_line);
 	YYACCEPT;
 }
 	| trg_def
 	| view_def
 	| schema_def
 	| type_def
+	| default_def
+	| constraint_def check_def
+{
+	put_node(CHECK, NULL, NULL,
+		 @2.first_column, @2.first_line,
+		 @2.last_column, @2.last_line);
+	YYACCEPT;
+}
+	| constraint_def foreign_def
+	| constraint_def primary_def
+;
+
+constraint_def: %empty
+	| CONSTRAINT NAME
+;
+
+primary_def: PRIMARY_KEY
+{
+	put_node(PRIMARY_KEY, NULL, NULL,
+		 @1.first_column, @1.first_line,
+		 @1.last_column, @1.last_column);
+	YYACCEPT;
+}
+
+foreign_def: FOREIGN_KEY '(' NAME ')'
+	     REFERENCES obj_name '(' NAME ')'
+{
+	put_node(FOREIGN_KEY, NULL, $3,
+		 @3.first_column, @3.first_line,
+		 @3.last_column, @3.last_line);
+	YYACCEPT;
+}
 ;
 
 proc_def: mk_def PROC obj_name
@@ -113,23 +148,19 @@ type_def: mk_def TYPE obj_name
 }
 ;
 
-index_def: mk_def UNIQUE clust_idx_def
-{
-	$$ = $3;
-}
-	| mk_def clust_idx_def
+index_def: UNIQUE clust_idx_def
 {
 	$$ = $2;
+}
+	| clust_idx_def
+{
+	$$ = $1;
 }
 ;
 
 clust_idx_def: INDEX NAME ONX obj_name
 {
 	$$ = $4;
-}
-	| CLUSTERED clust_idx_def
-{
-	$$ = $2;
 }
 	| NONCLUSTERED clust_idx_def
 {
@@ -141,11 +172,70 @@ mk_def: CREATE
 	| ALTER
 ;
 
-column_def: COLUMN data_type column_def_opt_list
+check_def: CHECK comparison_expr
 {
-	put_node(COLUMN, $2->schema, $2->objname,
-		 @2.first_column, @2.first_line,
-	      	 @2.last_column, @2.last_line);
+	@$ = @2;
+}
+	| CHECK NOT_FOR_REPLICATION comparison_expr
+{
+	@$ = @3;
+}
+	| WITH_CHECK CONSTRAINT obj_name CHECK comparison_expr
+{
+	@$ = @5;
+}
+	| WITH_NOCHECK CONSTRAINT obj_name CHECK comparison_expr
+{
+	@$ = @5;
+}
+;
+
+
+default_def: DEFAULT const_expr FOR obj_name
+{
+	put_node(DEFAULT, $4->schema, $4->objname,
+		 @4.first_column, @4.first_line,
+		 @4.last_column, @4.last_line);
+	YYACCEPT;
+}
+
+comparison_expr: const_expr COMPARISON const_expr
+		 | '(' comparison_expr ')'
+;
+
+const_expr: scalar_exp
+	    | '(' const_expr ')'
+;
+
+atom: INTNUM
+      | STRING
+      | APPROXNUM
+;
+
+scalar_exp: scalar_exp '+' scalar_exp
+	    | scalar_exp '-' scalar_exp
+	    | scalar_exp '*' scalar_exp
+	    | scalar_exp '/' scalar_exp
+	    | '+' scalar_exp
+	    | '-' scalar_exp
+	    | atom
+	    | obj_name
+	    | func_def
+;
+
+func_def: obj_name '(' scalar_exp_commalist ')'
+	  | obj_name '(' ')'
+;
+
+scalar_exp_commalist: scalar_exp
+		| scalar_exp_commalist ',' scalar_exp
+;
+
+column_def: COLUMN obj_name data_type column_def_opt_list
+{
+	put_node(COLUMN, $3->schema, $3->objname,
+		 @3.first_column, @3.first_line,
+		 @3.last_column, @3.last_line);
 		 
 	YYACCEPT;
 }
@@ -174,7 +264,7 @@ obj_name: NAME
 }
 ;
 
-column_def_opt_list: /* empty */
+column_def_opt_list: %empty
 	| column_def_opt_list FILESTREAM
 {
 }

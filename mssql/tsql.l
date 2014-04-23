@@ -30,6 +30,10 @@ SPARSE		{ return SPARSE; }
 IDENTITY	{ return IDENTITY; }
 FOR		{ return FOR; }
 NOT[ \t\n]+FOR[ \t\n]+REPLICATION	{ return NOT_FOR_REPLICATION; }
+WITH[ \t\n]+NOCHECK 			{ return WITH_NOCHECK; }
+WITH[ \t\n]+CHECK   			{ return WITH_CHECK; }
+PRIMARY[ \t\n]+KEY			{ return PRIMARY_KEY; }
+FOREIGN[ \t\n]+KEY			{ return FOREIGN_KEY; }
 CREATE		{ return CREATE;}
 ALTER		{ return ALTER; }
 PROC|PROCEDURE	{ return PROC; }
@@ -43,9 +47,29 @@ CLUSTERED	{ return CLUSTERED; }
 NONCLUSTERED	{ return NONCLUSTERED; }
 FUNCTION	{ return FUNCTION; }
 ON		{ return ONX; }
+DEFAULT		{ return DEFAULT; }
+CHECK		{ return CHECK; }
+WITH		{ return WITH; }
+CONSTRAINT	{ return CONSTRAINT; }
+REFERENCES	{ return REFERENCES; }
 
-[0-9]+		{ yylval.ival = atoi(yytext); return INTNUM; }
+"="		|
+"<>"		|
+"<"		|
+">"		|
+"<="		|
+">="		|
+"!="		{ yylval.sval = strdup(yytext); return COMPARISON; }
 
+[0-9]+ 		|
+[0-9]+"."[0-9]*	|
+"."[0-9]*		{ yylval.ival = atoi(yytext); return INTNUM; }
+
+[0-9]+[eE][+-]?[0-9]+	      	|
+[0-9]+"."[0-9]*[eE][+-]?[0-9]+ 	|
+"."[0-9]*[eE][+-]?[0-9]+		{ return APPROXNUM; }
+
+'[^'\n]*'	{ yylval.sval = strdup(yytext); return STRING; }
 [-+*/(),.;]	return yytext[0];
 "--".*$		{ yycolumn = 1; /* skip comment */ }
 [A-Za-z][A-Za-z0-9_]*	{ yylval.sval = strdup(yytext); return NAME; }
