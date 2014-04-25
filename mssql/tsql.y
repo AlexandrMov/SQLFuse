@@ -60,7 +60,7 @@ input: column_def
 	| view_def
 	| schema_def
 	| type_def
-	| default_def
+	| constraint_def default_def
 	| constraint_def check_def
 {
 	put_node(CHECK, NULL, NULL,

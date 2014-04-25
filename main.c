@@ -75,29 +75,34 @@ static int find_object(const char *pathname, struct sqlfs_ms_obj **object)
     obj = g_hash_table_lookup(cache.temp_table, pathname);
   
   if (!obj) {
-    while(*tree) {
+    
+    while(*tree && !err) {
       g_string_append_printf(path, "%s%s", G_DIR_SEPARATOR_S, *tree);
       err = 0;
       obj = g_hash_table_lookup(cache.cache_table, path->str);
+      
       if (!obj) {
+	obj = g_try_new0(struct sqlfs_ms_obj, 1);
 	if (i == 0) {
-	  err = find_ms_object(NULL, *tree, &obj);
+	  err = find_ms_object(NULL, *tree, obj);
 	}
 	if (i > 0) {
-	  err = find_ms_object(g_list_last(list)->data, *tree, &obj);
+	  err = find_ms_object(g_list_last(list)->data, *tree, obj);
 	}
       }
       
       if (!err && obj && obj->name) {
+
 	list = g_list_append(list, obj);
 	if (!g_hash_table_contains(cache.cache_table, path->str)) {
 	  g_mutex_lock(&cache.m);
 	  g_hash_table_insert(cache.cache_table, g_strdup(path->str), obj);
 	  g_mutex_unlock(&cache.m);
 	}
+
       } else {
 	free_ms_obj(obj);
-	err = 1;
+	err = EERES;
       }
       tree++;
       i++;
@@ -108,10 +113,11 @@ static int find_object(const char *pathname, struct sqlfs_ms_obj **object)
       obj = last->data;
     
     g_list_free(list);
+    
   }
 
-  *object = g_try_new0(struct sqlfs_ms_obj, 1);
-  **object = *obj;
+  if (!err)
+    *object = obj;
 
   tree -= i;
   g_strfreev(tree);
@@ -144,8 +150,6 @@ static int sqlfs_getattr(const char *path, struct stat *stbuf)
       }
       stbuf->st_mtime = object->mtime;
     }
-
-    g_free(object);
   }
 
   return err;
@@ -187,10 +191,11 @@ static int sqlfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	: g_strconcat(path, object->name, NULL);
       if (!g_hash_table_contains(cache.cache_table, str)) {
 	g_mutex_lock(&cache.m);
-	g_hash_table_insert(cache.cache_table, str, object);
+	g_hash_table_insert(cache.cache_table, g_strdup(str), object);
 	g_mutex_unlock(&cache.m);
       }
       wrk = g_list_next(wrk);
+      g_free(str);
     }
     g_list_free(wrk);
   
@@ -359,7 +364,8 @@ static int sqlfs_write(const char *path, const char *buf, size_t size,
   if (fsfile && fsfile->buffer) {
     size_t len = strlen(fsfile->buffer);
     if (len < size + offset)
-      fsfile->buffer = g_realloc_n(fsfile->buffer, size + offset + 1, sizeof(gchar));
+      fsfile->buffer = g_realloc_n(fsfile->buffer, size + offset + 1,
+				   sizeof(gchar));
     g_strlcpy(fsfile->buffer + offset, buf, size + 1);
     fsfile->flush = 1;
     err = size;

@@ -55,12 +55,11 @@ int init_context(const struct sqlctx *sqlctx,
 
   if (!ectx) {
     ectx = g_try_new0(exectx_t, 1);
-    ectx->ctx = g_try_new0(struct sqlctx, 1);
   }
   
   int error = 0;
 
-  if (ectx && ectx->ctx) {
+  if (ectx) {
     ectx->ctx = g_memdup(sqlctx, sizeof(*sqlctx));
   }
   else
@@ -103,6 +102,9 @@ int init_context(const struct sqlctx *sqlctx,
       if (!error) {
 	g_mutex_init(&msctx->lock);
 	ectx->ctxlist = g_slist_append(ectx->ctxlist, msctx);
+      }
+      else {
+	g_free(msctx);
       }
     }
     

@@ -121,7 +121,7 @@ struct sqlfs_ms_obj {
 int init_msctx(struct sqlctx *ctx);
 
 int find_ms_object(const struct sqlfs_ms_obj *parent,
-		   const char *name, struct sqlfs_ms_obj **obj);
+		   const char *name, struct sqlfs_ms_obj *obj);
 
 int load_schemas(GList **obj_list);
 

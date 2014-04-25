@@ -221,11 +221,11 @@ static int load_datatypes()
 }
 
 int find_ms_object(const struct sqlfs_ms_obj *parent,
-		   const char *name, struct sqlfs_ms_obj **obj)
+		   const char *name, struct sqlfs_ms_obj *obj)
 {
   int error = 0;
 
-  if (!name)
+  if (!name || !obj)
     return EENULL;
 
   RETCODE erc;
@@ -288,25 +288,24 @@ int find_ms_object(const struct sqlfs_ms_obj *parent,
     dbbind(ctx->dbproc, 6, INTBIND, (DBINT) 0, (BYTE *) &def_len_buf);
     
     int rowcode = dbnextrow(ctx->dbproc);
-    *obj = g_try_new0(struct sqlfs_ms_obj, 1);
     if (rowcode != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
-	(*obj)->name = g_strdup(trimwhitespace(name_buf));
-	(*obj)->type = str2mstype(trimwhitespace(type_buf));
-	if ((*obj)->type == D_SCHEMA)
-	  (*obj)->schema_id = obj_id_buf;
-	(*obj)->object_id = obj_id_buf;
-	(*obj)->ctime = cdate_buf;
-	(*obj)->mtime = mdate_buf;
+	obj->name = g_strdup(trimwhitespace(name_buf));
+	obj->type = str2mstype(trimwhitespace(type_buf));
+	if (obj->type == D_SCHEMA)
+	  obj->schema_id = obj_id_buf;
+	obj->object_id = obj_id_buf;
+	obj->ctime = cdate_buf;
+	obj->mtime = mdate_buf;
 
-	if((*obj)->type == R_P || (*obj)->type == D_V ||
-	   (*obj)->type == R_FN || (*obj)->type == R_TF ||
-	   (*obj)->type == R_TR || (*obj)->type == R_COL) {
-	  (*obj)->len = def_len_buf;
+	if(obj->type == R_P || obj->type == D_V ||
+	   obj->type == R_FN || obj->type == R_TF ||
+	   obj->type == R_TR || obj->type == R_COL) {
+	  obj->len = def_len_buf;
 	}
 
-	(*obj)->cached_time = g_get_monotonic_time();
+	obj->cached_time = g_get_monotonic_time();
 	break;
       case BUF_FULL:
 	break;
@@ -831,7 +830,7 @@ void free_ms_obj(gpointer msobj)
   if (!msobj)
     return ;
   
-  struct sqlfs_ms_obj * obj = (struct sqlfs_ms_obj *) msobj;
+  struct sqlfs_ms_obj *obj = (struct sqlfs_ms_obj *) msobj;
   
   switch(obj->type) {
   case R_P:
