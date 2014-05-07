@@ -21,7 +21,7 @@ int init_context(const struct sqlctx *sqlctx, gpointer err_handler,
  * Выполнить SQL-запрос на основе контекста
  *
  */
-int exec_sql(const char *sql, msctx_t **context);
+msctx_t * exec_sql(const char *sql, GError **err);
 
 /*
  *

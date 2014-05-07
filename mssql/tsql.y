@@ -3,18 +3,20 @@
   #include <string.h>
 
   #include "tsqlcheck.h"
+}
 
-  struct node_obj {
-  	 char *dbname;
-  	 char *schema;
+%code requires {
+      struct node_obj {
+      	 char *dbname;
+	 char *schema;
 	 char *objname;
-  };
+      };
 }
 
 %union {
        int ival;
        char *sval;
-       struct node_obj *nodeobj;
+       struct node_obj nodeobj;
 }
 
 %{
@@ -51,7 +53,7 @@ input: column_def
 	| func_def
 	| constraint_def index_def
 {
-	put_node(INDEX, $2->schema, $2->objname,
+	put_node(INDEX, $2.schema, $2.objname,
 		 @2.first_column, @2.first_line,
 	      	 @2.last_column, @2.last_line);
 	YYACCEPT;
@@ -96,7 +98,7 @@ foreign_def: FOREIGN_KEY '(' NAME ')'
 
 proc_def: mk_def PROC obj_name
 {
-	put_node(PROC, $3->schema, $3->objname,
+	put_node(PROC, $3.schema, $3.objname,
 		 @3.first_column, @3.first_line,
 	      	 @3.last_column, @3.last_line);
 	YYACCEPT;
@@ -105,7 +107,7 @@ proc_def: mk_def PROC obj_name
 
 func_def: mk_def FUNCTION obj_name
 {
-	put_node(FUNCTION, $3->schema, $3->objname,
+	put_node(FUNCTION, $3.schema, $3.objname,
 		 @3.first_column, @3.first_line,
 	      	 @3.last_column, @3.last_line);
 	YYACCEPT;
@@ -114,7 +116,7 @@ func_def: mk_def FUNCTION obj_name
 
 trg_def: mk_def TRIGGER obj_name ONX obj_name
 {
-	put_node(TRIGGER, $3->schema, $3->objname,
+	put_node(TRIGGER, $3.schema, $3.objname,
 		 @3.first_column, @3.first_line,
 	      	 @3.last_column, @3.last_line);
 	YYACCEPT;
@@ -123,7 +125,7 @@ trg_def: mk_def TRIGGER obj_name ONX obj_name
 
 view_def: mk_def VIEW obj_name
 {
-	put_node(VIEW, $3->schema, $3->objname,
+	put_node(VIEW, $3.schema, $3.objname,
 		 @3.first_column, @3.first_line,
 	      	 @3.last_column, @3.last_line);
 	YYACCEPT;
@@ -141,7 +143,7 @@ schema_def: mk_def SCHEMA NAME
 
 type_def: mk_def TYPE obj_name
 {
-	put_node(TYPE, $3->schema, $3->objname,
+	put_node(TYPE, $3.schema, $3.objname,
 		 @3.first_column, @3.first_line,
 	      	 @3.last_column, @3.last_line);
 	YYACCEPT;
@@ -193,7 +195,7 @@ check_def: CHECK comparison_expr
 
 default_def: DEFAULT const_expr FOR obj_name
 {
-	put_node(DEFAULT, $4->schema, $4->objname,
+	put_node(DEFAULT, $4.schema, $4.objname,
 		 @4.first_column, @4.first_line,
 		 @4.last_column, @4.last_line);
 	YYACCEPT;
@@ -233,7 +235,7 @@ scalar_exp_commalist: scalar_exp
 
 column_def: COLUMN obj_name data_type column_def_opt_list
 {
-	put_node(COLUMN, $3->schema, $3->objname,
+	put_node(COLUMN, $3.schema, $3.objname,
 		 @3.first_column, @3.first_line,
 		 @3.last_column, @3.last_line);
 		 
@@ -249,18 +251,18 @@ data_type: obj_name
 
 obj_name: NAME
 {
-	$$->objname = $1;
+	$$.objname = $1;
 }
 	| NAME '.' NAME
 {
-	$$->schema = $1;
-	$$->objname = $3;
+	$$.schema = $1;
+	$$.objname = $3;
 }	
 	| NAME '.' NAME '.' NAME
 {
-	$$->dbname = $1;
-	$$->schema = $3;
-	$$->objname = $5;
+	$$.dbname = $1;
+	$$.schema = $3;
+	$$.objname = $5;
 }
 ;
 

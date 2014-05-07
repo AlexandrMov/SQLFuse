@@ -4,7 +4,7 @@
 /*
  * Лист синтаксического дерева
  */
-typedef struct {
+typedef struct objnode {
   unsigned int type;
   
   char *objname;

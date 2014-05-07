@@ -83,5 +83,5 @@ REFERENCES	{ return REFERENCES; }
 void
 yyerror(char *s)
 {
-	printf("%s at %s\n", s, yytext);
+	printf("== FLEX: %s at %s\n", s, yytext);
 }

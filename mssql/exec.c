@@ -1,5 +1,6 @@
 #include "exec.h"
 
+
 typedef struct {
   struct sqlctx *ctx;
   
@@ -8,29 +9,27 @@ typedef struct {
 
 exectx_t *ectx;
 
-static int do_exec_sql(const char *sql, const msctx_t *ctx)
+static gboolean do_exec_sql(const char *sql, const msctx_t *ctx, GError **err)
 {
-  if (!sql || !ctx)
-    return EENULL;
-
-  int error = 0;
-  
-  if (!error && (dbcmd(ctx->dbproc, sql) == FAIL)) {
-    g_printerr("%d: dbcmd() failed\n", __LINE__);
-    error = EECMD;
+  if ((dbcmd(ctx->dbproc, sql) == FAIL)) {
+    g_set_error(err, EECMD, EECMD,
+		"%d: dbcmd() failed\n", __LINE__);
+    return FALSE;
   }
   
-  if (!error && (dbsqlexec(ctx->dbproc) == FAIL)) {
-    g_printerr("%d: dbsqlexec() failed\n", __LINE__);
-    error = EEXEC;
+  if ((dbsqlexec(ctx->dbproc) == FAIL)) {
+    g_set_error(err, EEXEC, EEXEC,
+		"%d: dbsqlexec() failed\n", __LINE__);
+    return FALSE;
   }
   
-  if (!error && (dbresults(ctx->dbproc) == FAIL)) {
-    g_printerr("%d: dbresults() failed\n", __LINE__);
-    error = EERES;
+  if ((dbresults(ctx->dbproc) == FAIL)) {
+    g_set_error(err, EERES, EERES,
+		"%d: dbresults() failed\n", __LINE__);
+    return FALSE;
   }
 
-  return error;
+  return TRUE;
 }
 
 int init_context(const struct sqlctx *sqlctx,
@@ -113,18 +112,16 @@ int init_context(const struct sqlctx *sqlctx,
   return error;
 }
 
-int exec_sql(const char *sql, msctx_t **msctx)
+msctx_t * exec_sql(const char *sql, GError **error)
 {
-  int error = 0;
-
   gboolean lock;
   int i, len = g_slist_length(ectx->ctxlist);
   GSList *list = ectx->ctxlist;
   msctx_t *wrkctx = NULL;
+  GError *terr = NULL;
   RETCODE erc;
 	
   for (i = 0; i < len; i++) {
-    error = 0;
     wrkctx = list->data;
     lock = g_mutex_trylock(&wrkctx->lock);
 
@@ -136,28 +133,39 @@ int exec_sql(const char *sql, msctx_t **msctx)
 	
 	if ((wrkctx->dbproc = dbopen(wrkctx->login,
 				     ectx->ctx->servername)) == NULL) {
-	  g_printerr("%s:%d: unable to connect to %s as %s\n",
-		     ectx->ctx->appname, __LINE__,
-		     ectx->ctx->servername, ectx->ctx->username);
-	  error = EECONN;
+	  g_set_error(&terr, EECONN, EECONN,
+		      "%s:%d: unable to connect to %s as %s\n",
+		      ectx->ctx->appname, __LINE__,
+		      ectx->ctx->servername, ectx->ctx->username);
 	}
 	
-	if (!error && ectx->ctx->dbname
+	if (!terr && ectx->ctx->dbname
 	    && (erc = dbuse(wrkctx->dbproc, ectx->ctx->dbname)) == FAIL) {
-	  g_printerr("%s:%d: unable to use to database %s\n",
-		     ectx->ctx->appname, __LINE__,
-		     ectx->ctx->dbname);
-	  error = EEUSE;
+	  g_set_error(&terr, EEUSE, EEUSE,
+		      "%s:%d: unable to use to database %s\n",
+		      ectx->ctx->appname, __LINE__,
+		      ectx->ctx->dbname);
 	}
 	
       }
+      
+      if (terr == NULL && do_exec_sql(sql, wrkctx, &terr) == FALSE
+	  && !dbdead(wrkctx->dbproc)) {
+	g_clear_error(&terr);
+	g_set_error(&terr, EECONN, EECONN, "SQL Error: %s\n", sql);
+      }
 
-      if (!error && !do_exec_sql(sql, wrkctx))
-	break;
-      
-      g_message("Error #%d: %s, %d", error, sql, i);
-      g_mutex_unlock(&wrkctx->lock);
-      
+      if (terr != NULL) {	
+	if (!dbdead(wrkctx->dbproc)) {
+	  g_mutex_unlock(&wrkctx->lock);
+	  break;
+	}
+	
+	g_clear_error(&terr);
+	g_mutex_unlock(&wrkctx->lock);
+      }
+      else
+	break;  
     }
 
     list = g_slist_next(list);
@@ -169,16 +177,15 @@ int exec_sql(const char *sql, msctx_t **msctx)
     if (list && list->data) {
       wrkctx = list->data;
       g_mutex_lock(&wrkctx->lock);
-      if (do_exec_sql(sql, wrkctx))
-	error = EERES;
+      do_exec_sql(sql, wrkctx, &terr);
     }
-    
+
   }
 
-  if (!error)
-    *msctx = wrkctx;
-  
-  return error;
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+
+  return wrkctx;
 }
 
 void close_sql(msctx_t *context)
@@ -195,7 +202,6 @@ int close_context()
   int i, len = g_slist_length(ectx->ctxlist);
   msctx_t *wrkctx = NULL;
   GSList *list = ectx->ctxlist;
-  RETCODE erc;
   gboolean lock;
   
   for (i = 0; i < len; i++) {

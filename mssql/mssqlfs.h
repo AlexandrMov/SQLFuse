@@ -53,6 +53,7 @@
 #define EECMD 0x121
 #define EEXEC 0x122
 #define EERES 0x123
+#define EENOTFOUND 0x221
 
 struct sqlctx {
   char *appname;
@@ -80,11 +81,16 @@ struct sqlfs_ms_column {
   int systype;
   char *type_name;
   int nullable;
-  int identity;
   int max_len;
   int precision;
   int scale;
   int ansi;
+
+  int identity;
+  int not4repl;
+  char *seed_val;
+  char *inc_val;
+
   char *def;
 };
 
@@ -100,6 +106,21 @@ struct sqlfs_ms_fk {
   int updact;
 };
 
+struct sqlfs_ms_index {
+  int type_id;
+  int is_unique;
+  int ignore_dup_key;
+  int is_pk, has_filter;
+  int is_unique_const;
+  int fill_factor, is_padded;
+  int is_disabled, is_hyp;
+  int allow_rl, allow_pl;
+
+  char *filter_def;
+  char *columns_def;
+  char *incl_columns_def;
+};
+
 struct sqlfs_ms_obj {
   int object_id;
   int parent_id;
@@ -111,6 +132,7 @@ struct sqlfs_ms_obj {
     struct sqlfs_ms_column *column;
     struct sqlfs_ms_fk *foreign_ctrt;
     struct sqlfs_ms_type *mstype;
+    struct sqlfs_ms_index *index;
   };
   unsigned int len;
   time_t ctime;
@@ -118,27 +140,63 @@ struct sqlfs_ms_obj {
   time_t cached_time;
 };
 
+
+/*
+ * Инициализировать контекст
+ */
 int init_msctx(struct sqlctx *ctx);
 
-int find_ms_object(const struct sqlfs_ms_obj *parent,
-		   const char *name, struct sqlfs_ms_obj *obj);
+/*
+ * Найти объект
+ */
+struct sqlfs_ms_obj * find_ms_object(const struct sqlfs_ms_obj *parent,
+				     const char *name, GError **error);
 
-int load_schemas(GList **obj_list);
+/*
+ * Список объектов корневого уровня
+ */
+GList * fetch_schemas(const char *name, GError **error);
 
-int load_schema_obj(const struct sqlfs_ms_obj *sch, GList **obj_list);
 
-int load_table_obj(const struct sqlfs_ms_obj *tbl, GList **obj_list);
+/*
+ * Список объектов уровня схемы
+ */
+GList * fetch_schema_obj(int schema_id, const char *name,
+			 GError **error);
 
-int load_module_text(const char *parent, struct sqlfs_ms_obj *obj, char **text);
+/*
+ * Вернёт список объектов уровня таблицы
+ */
+GList * fetch_table_obj(int schema_id, int table_id, const char *name,
+			GError **error);
 
+/*
+ * Загрузить полный программный текст модуля
+ */
+char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
+			GError **error);
+
+/*
+ * Создать/записать объект
+ */
 int write_ms_object(const char *schema, const struct sqlfs_ms_obj *parent,
 		    const char *text, struct sqlfs_ms_obj *obj);
 
+/*
+ * Удалить объект
+ */
 int remove_ms_object(const char *schema, const char *parent,
 		     struct sqlfs_ms_obj *obj);
 
+/*
+ * Убрать за объектом
+ */
 void free_ms_obj(gpointer msobj);
 
+/*
+ * Закончить работу с контекстом
+ */
 int close_msctx();
+
   
 #endif

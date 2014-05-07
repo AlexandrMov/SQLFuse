@@ -1,4 +1,4 @@
-PROGRAM 	:= sqlfs
+PROGRAM 	:= sqlfuse
 CC		:= gcc
 YACC		:= bison -dvl
 LEX		:= flex -L
@@ -9,9 +9,10 @@ OBJ_FILES	:= main.o
 
 # MSSQL
 MSSQL_PREFIX	:= ./mssql/
-MSSQL_FILES	:= mssqlfs.c tsqlcheck.c exec.c
+MSSQL_FILES	:= mssqlfs.c tsqlcheck.c exec.c table.c util.c
 MSSQL_GEN_FILES	:= tsql.tab.c tsql.parser.c tsql.tab.h
-MSSQL_OBJS	:= tsql.tab.o tsql.parser.o mssqlfs.o tsqlcheck.o exec.o
+MSSQL_OBJS	:= tsql.tab.o tsql.parser.o mssqlfs.o tsqlcheck.o
+MSSQL_OBJS	+= exec.o table.o util.o
 SRC_FILES	+= $(addprefix $(MSSQL_PREFIX), $(MSSQL_FILES))
 OBJ_FILES	+= $(addprefix $(MSSQL_PREFIX), $(MSSQL_OBJS))
 MODULES		+= mssql
