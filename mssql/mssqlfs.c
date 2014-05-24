@@ -62,9 +62,6 @@ int init_msctx(struct sqlctx *ctx)
 struct sqlfs_ms_obj * find_ms_object(const struct sqlfs_ms_obj *parent,
 				     const char *name, GError **error)
 {
-  if (!name)
-    return NULL;
-
   GError *terr = NULL;
   GList *list = NULL;
   if (!parent) {
@@ -97,12 +94,9 @@ struct sqlfs_ms_obj * find_ms_object(const struct sqlfs_ms_obj *parent,
   return result;
 }
 
-int write_ms_object(const char *schema, const struct sqlfs_ms_obj *parent,
-		    const char *text, struct sqlfs_ms_obj *obj)
+void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
+		     const char *text, struct sqlfs_ms_obj *obj, GError **err)
 {
-  if (!obj || !obj->name || !text)
-    return EENULL;
-
   int error = 0;
   GError *terr = NULL;
   start_checker();
@@ -116,79 +110,47 @@ int write_ms_object(const char *schema, const struct sqlfs_ms_obj *parent,
   
   if (!error && node != NULL) {
     char *wrktext = NULL;
-    GString *sql = g_string_new(NULL);
-    if (node->type == COLUMN) {
-      if (!parent || !parent->name) {
-	error = EENULL;
-      }
-      else {
-	wrktext = g_strdup(text + node->first_column - 1);
-	g_string_append_printf(sql, "ALTER TABLE %s.%s", schema, parent->name);
-	if (obj->object_id) {
-	  g_string_append(sql, " ALTER COLUMN ");
-	}
-	else {
-	  g_string_append(sql, " ADD ");
-	}
-	g_string_append_printf(sql, "%s ", obj->name);
-      }
-    }
-    else {
+    switch (node->type) {
+    case COLUMN:
+      wrktext = create_column_def(schema, parent->name, obj,
+				  text + node->first_column - 1);
+      break;
+    case CHECK:
+      obj->type = R_C;
+    case DEFAULT:
+      obj->type = R_D;
+      wrktext = create_constr_def(schema, parent->name, obj,
+				  text + node->first_column - 1);
+      break;
+    default:
       wrktext = g_strdup(text);
     }
 
-    if (!error) {
-      g_string_append_printf(sql, "%s", wrktext);
-    }
-    
-    msctx_t *ctx = exec_sql(sql->str, &terr);
-    if (terr == NULL) {
-      
-      switch(node->type) {
-      case COLUMN:
-	obj->type = R_COL;
-	if (!obj->column)
-	  obj->column = g_try_new0(struct sqlfs_ms_column, 1);
-	
-	obj->column->def = g_strdup(text);
-	obj->len = strlen(text);
-	break;
-      case PROC:
-	obj->type = R_P;
-	break;
-      case FUNCTION:
-	obj->type = R_FN;
-	break;
-      case TRIGGER:
-	obj->type = R_TR;
-	break;
-      default:
-	error = EENOTSUP;
-	break;
-      }
-    }
-    
+    msctx_t *ctx = exec_sql(wrktext, &terr);
     close_sql(ctx);
     g_free(wrktext);
-    g_string_free(sql, TRUE);
-    
+  }
+  else {
+    g_set_error(&terr, EEPARSE, EEPARSE, NULL);
   }
   
   end_checker();
 
-  return error;
+  if (terr != NULL)
+    g_propagate_error(err, terr);
 }
   
-int remove_ms_object(const char *schema, const char *parent,
-		     struct sqlfs_ms_obj *obj)
+void remove_ms_object(const char *schema, const char *parent,
+		      struct sqlfs_ms_obj *obj, GError **error)
 {
-  if (!obj || !schema)
-    return EENULL;
-  
-  int error = 0;
+  GError *terr = NULL;
   GString *sql = g_string_new(NULL);
   if (obj->type == R_COL) {
-    g_string_append_printf(sql, "ALTER TABLE %s.%s DROP COLUMN %s",
+    g_string_append_printf(sql, "ALTER TABLE [%s].[%s] DROP COLUMN [%s]",
+			   schema, parent, obj->name);
+  }
+  else if (obj->type == R_C || obj->type == R_D) {
+    g_string_append_printf(sql, "ALTER TABLE [%s].[%s] DROP CONSTRAINT [%s]",
 			   schema, parent, obj->name);
   }
   else {
@@ -211,75 +173,98 @@ int remove_ms_object(const char *schema, const char *parent,
     case R_P:
       g_string_append(sql, "PROCEDURE");
       break;
+    case R_TR:
+      g_string_append(sql, "TRIGGER");
     default:
-      error = EENOTSUP;
+      g_set_error(&terr, EENOTSUP, EENOTSUP, NULL);
     }
     
     g_string_append_printf(sql, " %s.%s", schema, obj->name);
   }
-
-  if (!error) {
-    msctx_t *ctx = exec_sql(sql->str, NULL);
+  
+  if (terr == NULL) {
+    msctx_t *ctx = exec_sql(sql->str, &terr);
     close_sql(ctx);
   }
 
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+  
   g_string_free(sql, TRUE);
 
-  return error;
+}
+
+static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj,
+				    GError **error)
+{
+  GError *terr = NULL;
+  char *def = NULL;
+  
+  GString *sql = g_string_new(NULL);
+  g_string_append_printf(sql, "EXEC sp_helptext '%s.%s'", parent, obj->name);
+  msctx_t *ctx = exec_sql(sql->str, &terr);
+
+  if (!terr) {
+    g_string_truncate(sql, 0);
+    
+    struct sqlfs_ms_module * module = NULL;
+    DBCHAR def_buf[256];
+    dbbind(ctx->dbproc, 1, NTBSTRINGBIND, (DBINT) 0, (BYTE *) def_buf);
+    int rowcode;
+    
+    while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
+      switch(rowcode) {
+      case REG_ROW:
+	g_string_append(sql, def_buf);
+	break;
+      case BUF_FULL:
+	break;
+      case FAIL:
+	g_set_error(&terr, EERES, EERES,
+		    "%d: dbresults failed\n", __LINE__);
+	break;
+      }
+    }
+      
+    if (!terr) {
+      module = g_try_new0(struct sqlfs_ms_module, 1);
+      module->def = g_strdup(sql->str);
+      obj->sql_module = module;
+      def = g_strdup(sql->str);
+    }
+      
+  }
+  
+  close_sql(ctx);
+  g_string_free(sql, TRUE);
+
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+
+  return def;
 }
 
 char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
 			GError **error)
 {
-  if (!obj || !parent)
-    return NULL;
-
   GError *terr = NULL;
   char *def = NULL;
-  if (obj->type == R_COL && obj->column) {
-    def = g_strdup(obj->column->def);
-  }
-  else {
-    GString *sql = g_string_new(NULL);
-    
-    g_string_append_printf(sql, "EXEC sp_helptext '%s.%s'", parent, obj->name);
-    msctx_t *ctx = exec_sql(sql->str, &terr);
 
-    if (!terr) {
-      g_string_truncate(sql, 0);
-    
-      struct sqlfs_ms_module * module = NULL;
-      DBCHAR def_buf[256];
-      dbbind(ctx->dbproc, 1, NTBSTRINGBIND, (DBINT) 0, (BYTE *) def_buf);
-      int rowcode;
-    
-      while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
-	switch(rowcode) {
-	case REG_ROW:
-	  g_string_append(sql, def_buf);
-	  break;
-	case BUF_FULL:
-	  break;
-	case FAIL:
-	  g_set_error(&terr, EERES, EERES,
-		      "%d: dbresults failed\n", __LINE__);
-	  break;
-	}
-      }
-      
-      if (!terr) {
-	module = g_try_new0(struct sqlfs_ms_module, 1);
-	module->def = g_strdup(sql->str);
-	obj->sql_module = module;
-	def = g_strdup(sql->str);
-      }
-      
-    }
-    
-    close_sql(ctx);
-    g_string_free(sql, TRUE);
+  switch(obj->type) {
+  case R_COL:
+    if (obj->column)
+      def = g_strdup(obj->column->def);      
+    break;
+  case R_C:
+  case R_D:
+    if (obj->clmn_ctrt)
+      def = g_strdup(obj->clmn_ctrt->def);
+    break;
+  default:
+    def = load_help_text(parent, obj, &terr);
+    break;
   }
-
+  
   if (terr != NULL)
     g_propagate_error(error, terr);
 
@@ -289,22 +274,24 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
 GList * fetch_table_obj(int schema_id, int table_id, const char *name,
 			GError **error)
 {
-  if (!schema_id || !table_id)
-    return NULL;
-
   GList *reslist = NULL;
   GError *terr = NULL;
 
   reslist = fetch_columns(table_id, name, &terr);
   
-  if (terr != NULL)
+  if (terr == NULL)
     reslist = g_list_concat(reslist, fetch_modules(table_id, name, &terr));
 
-  if (terr != NULL)
-    reslist = g_list_concat(reslist, fetch_indexes(table_id, name, &terr));
+  /*if (terr == NULL)
+    reslist = g_list_concat(reslist, fetch_indexes(table_id, name, &terr));*/
 
-  if (terr != NULL)
+  if (terr == NULL) {
     reslist = g_list_concat(reslist, fetch_constraints(table_id, name, &terr));
+  }
+
+  if (terr != NULL) {
+    g_message("%d: %s\n", terr->code, terr->message);
+  }
   
   return reslist;
 }
@@ -312,9 +299,6 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
 GList * fetch_schema_obj(int schema_id, const char *name,
 			 GError **error)
 {
-  if (!schema_id)
-    return NULL;
-
   GList *lst = NULL;
   GError *terr = NULL;
   
@@ -363,8 +347,7 @@ GList * fetch_schema_obj(int schema_id, const char *name,
 	obj->cached_time = g_get_monotonic_time();
 
 	if (obj->type == R_P || obj->type == D_V ||
-	    obj->type == R_FN || obj->type == R_TF ||
-	    obj->type == R_COL) {
+	    obj->type == R_FN || obj->type == R_TF) {
 	  obj->len = def_len_buf;
 	}
 	lst = g_list_append(lst, obj);

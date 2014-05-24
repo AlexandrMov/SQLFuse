@@ -1,5 +1,6 @@
 CREATE PROCEDURE dbo.spLibTest
 AS
 BEGIN
-    SELECT '1'
+    SELECT '13'
+    SELECT 'hello'
 END

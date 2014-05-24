@@ -3,6 +3,60 @@
 #include "exec.h"
 #include "util.h"
 
+char * create_column_def(const char *schema, const char *table,
+			 struct sqlfs_ms_obj *obj, const char *def)
+{
+  char *result = NULL;
+  GString *sql = g_string_new(NULL);
+  g_string_append_printf(sql, "ALTER TABLE %s.%s", schema, table);
+  if (obj->object_id) {
+    g_string_append(sql, " ALTER COLUMN ");
+  }
+  else {
+    g_string_append(sql, " ADD ");
+  }
+  g_string_append_printf(sql, "%s %s", obj->name, def);
+
+  result = g_strdup(sql->str);
+  g_string_free(sql, TRUE);
+  
+  return result;
+}
+
+char * create_constr_def(const char *schema, const char *table,
+			 struct sqlfs_ms_obj *obj, const char *def)
+{
+  char *result = NULL;
+
+  GString *sql = g_string_new(NULL);
+  g_string_append_printf(sql, "ALTER TABLE [%s].[%s]", schema, table);
+  if (obj->object_id) {
+    g_string_append_printf(sql, " DROP CONSTRAINT [%s] \n", obj->name);
+  }
+
+  if (obj->type == R_C && obj->clmn_ctrt) {
+    if (obj->clmn_ctrt->disabled)
+      g_string_append(sql, " WITH NOCHECK ");
+    else
+      g_string_append(sql, " WITH CHECK ");
+  }
+
+  g_string_append_printf(sql, " ADD CONSTRAINT [%s] ", obj->name);
+
+  if (obj->type == R_C)
+    g_string_append_printf(sql, " CHECK %s", def);
+
+  if (obj->type == R_D && obj->clmn_ctrt) {
+    g_string_append_printf(sql, " DEFAULT %s FOR [%s]",
+			   obj->clmn_ctrt->column_name);
+  }
+
+  result = g_strdup(sql->str);
+  g_string_free(sql, TRUE);
+  
+  return result;
+}
+
 char * make_column_def(const struct sqlfs_ms_obj *obj)
 {
   if (!obj || !obj->column)
@@ -224,11 +278,134 @@ GList * fetch_modules(int tid, const char *name, GError **error)
   return list;
 }
 
+char * make_constraint_def(const struct sqlfs_ms_obj *ctrt, const char *def)
+{
+  if (!ctrt || !ctrt->clmn_ctrt || !def)
+    return NULL;
+
+  char *text = NULL;
+  GString *sql = g_string_new(NULL);
+
+  if (ctrt->type == R_D) {
+    g_string_append_printf(sql, "DEFAULT (%s) FOR %s",
+			   def, ctrt->clmn_ctrt->column_name);
+  }
+  else
+    if (ctrt->type == R_C) {
+      if (ctrt->clmn_ctrt->disabled == TRUE)
+	g_string_append(sql, "WITH NOCHECK ");
+      else
+	g_string_append(sql, "WITH CHECK ");
+      
+      g_string_append_printf(sql, "CONSTRAINT %s CHECK (%s)",
+			     ctrt->name, def);
+    }
+
+  text = g_strdup(sql->str);
+  g_string_free(sql, TRUE);
+  
+  return text;
+}
+
 GList * fetch_constraints(int tid, const char *name, GError **error)
 {
   GList *reslist = NULL;
 
-  
+  GError *terr = NULL;
+  GString *sql = g_string_new(NULL);
+
+  g_string_append(sql, "SELECT dc.object_id, dc.name, sc.name");
+  g_string_append(sql, ", dc.definition, dc.type, 0");
+  g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, dc.create_date)");
+  g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, dc.modify_date)");
+  g_string_append(sql, " FROM sys.columns sc");
+  g_string_append(sql, " INNER JOIN sys.default_constraints dc ");
+  g_string_append(sql, "  ON dc.parent_column_id = sc.column_id ");
+  g_string_append(sql, "    AND dc.parent_object_id = sc.object_id ");
+  g_string_append_printf(sql, "WHERE dc.parent_object_id = %d", tid);
+
+  if (name != NULL)
+    g_string_append_printf(sql, " AND dc.name = '%s'", name);
+
+  g_string_append(sql, " UNION ALL ");
+  g_string_append(sql, "SELECT cc.object_id, cc.name, ''");
+  g_string_append(sql, ", cc.definition, cc.type, cc.is_disabled");
+  g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, cc.create_date)");
+  g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, cc.modify_date)");
+  g_string_append(sql, " FROM sys.check_constraints cc ");
+  g_string_append_printf(sql, "WHERE cc.parent_object_id = %d", tid);
+
+  if (name != NULL)
+    g_string_append_printf(sql, "AND cc.name = '%s'", name);
+
+  msctx_t *ctx = exec_sql(sql->str, &terr);
+  if (terr == NULL) {
+    DBINT obj_id;
+    DBCHAR type_buf[2];
+    DBINT cdate_buf, mdate_buf, disabled;
+    char *csnt_name = g_malloc0_n(dbcollen(ctx->dbproc, 2) + 1, sizeof(char ));
+    char *clmn_name = g_malloc0_n(dbcollen(ctx->dbproc, 3) + 1, sizeof(char ));
+    char *def_text  = g_malloc0_n(dbcollen(ctx->dbproc, 4) + 1, sizeof(char ));
+
+    dbbind(ctx->dbproc, 1, INTBIND, (DBINT) 0, (BYTE *) &obj_id);
+    dbbind(ctx->dbproc, 2, STRINGBIND,
+	   dbcollen(ctx->dbproc, 2), (BYTE *) csnt_name);
+    dbbind(ctx->dbproc, 3, STRINGBIND,
+	   dbcollen(ctx->dbproc, 3), (BYTE *) clmn_name);
+    dbbind(ctx->dbproc, 4, STRINGBIND,
+	   dbcollen(ctx->dbproc, 4), (BYTE *) def_text);
+    dbbind(ctx->dbproc, 5, STRINGBIND, (DBINT) 0, (BYTE *) type_buf);
+    dbbind(ctx->dbproc, 6, INTBIND, (DBINT) 0, (BYTE *) &cdate_buf);
+    dbbind(ctx->dbproc, 7, INTBIND, (DBINT) 0, (BYTE *) &mdate_buf);
+    dbbind(ctx->dbproc, 8, INTBIND, (DBINT) 0, (BYTE *) &disabled);
+
+    int rowcode;
+    struct sqlfs_ms_obj *obj = NULL;
+    
+    while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
+      switch(rowcode) {
+      case REG_ROW:
+	obj = g_try_new0(struct sqlfs_ms_obj, 1);
+	obj->object_id = obj_id;
+	obj->parent_id = tid;
+	obj->name = g_strdup(trimwhitespace(csnt_name));
+	obj->mtime = mdate_buf;
+	obj->ctime = cdate_buf;
+	obj->type = str2mstype(trimwhitespace(type_buf));
+
+	obj->clmn_ctrt =  g_try_new0(struct sqlfs_ms_constraint, 1);
+
+	if (obj->type == R_D)
+	  obj->clmn_ctrt->column_name = g_strdup(trimwhitespace(clmn_name));
+	else
+	  obj->clmn_ctrt->disabled = disabled;
+	
+	obj->clmn_ctrt->def = make_constraint_def(obj, trimwhitespace(def_text));
+	obj->len = strlen(obj->clmn_ctrt->def);
+
+	obj->cached_time = g_get_monotonic_time();
+	reslist = g_list_append(reslist, obj);
+	break;
+      case BUF_FULL:
+	break;
+      case FAIL:
+	g_set_error(&terr, EERES, EERES,
+		    "%d: dbresults failed\n", __LINE__);
+	break;
+      }
+    }
+
+    g_free(csnt_name);
+    g_free(clmn_name);
+    g_free(def_text);
+    
+  }
+
+  close_sql(ctx);
+  g_string_free(sql, TRUE);
+
+  if (terr != NULL)
+    g_propagate_error(error, terr);
   
   return reslist;
 }
@@ -247,7 +424,7 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
   GList *reslist = NULL;
   GError *terr = NULL;
   GString *sql = g_string_new(NULL);
-  g_string_truncate(sql, 0);
+
   g_string_append(sql, "SELECT so.object_id, so.type");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, so.create_date)");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, so.modify_date)");
@@ -258,9 +435,9 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
   g_string_append(sql, ", si.allow_row_locks, si.allow_page_locks");
   g_string_append(sql, ", si.has_filter, si.filter_definition");
   
-  g_string_append(sql, ",((SELECT sc.name + ',' ");
+  g_string_append(sql, ",((SELECT sc.name ");
   g_string_append(sql, " +  CASE ic.is_descending_key WHEN 1 THEN ' DESC'");
-  g_string_append(sql, "     ELSE ' ASC' END");
+  g_string_append(sql, "     ELSE ' ASC' END + ','");
   g_string_append(sql, "   FROM sys.index_columns ic INNER JOIN sys.columns sc");
   g_string_append(sql, "    ON sc.column_id = ic.column_id ");
   g_string_append(sql, "     AND sc.object_id = ic.object_id");
@@ -269,9 +446,9 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
   g_string_append(sql, "     AND ic.is_included_column = 0");
   g_string_append(sql, "   FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)') )");
 
-  g_string_append(sql, ",((SELECT sc.name + ',' ");
+  g_string_append(sql, ",((SELECT sc.name ");
   g_string_append(sql, " +  CASE ic.is_descending_key WHEN 1 THEN ' DESC'");
-  g_string_append(sql, "     ELSE ' ASC' END");
+  g_string_append(sql, "     ELSE ' ASC' END + ','");
   g_string_append(sql, "   FROM sys.index_columns ic INNER JOIN sys.columns sc");
   g_string_append(sql, "    ON sc.column_id = ic.column_id ");
   g_string_append(sql, "     AND sc.object_id = ic.object_id");

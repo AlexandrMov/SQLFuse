@@ -63,11 +63,11 @@ input: column_def
 	| schema_def
 	| type_def
 	| constraint_def default_def
-	| constraint_def check_def
+	| check_def
 {
 	put_node(CHECK, NULL, NULL,
-		 @2.first_column, @2.first_line,
-		 @2.last_column, @2.last_line);
+		 @1.first_column, @1.first_line,
+		 @1.last_column, @1.last_line);
 	YYACCEPT;
 }
 	| constraint_def foreign_def
@@ -174,21 +174,21 @@ mk_def: CREATE
 	| ALTER
 ;
 
-check_def: CHECK comparison_expr
-{
-	@$ = @2;
-}
-	| CHECK NOT_FOR_REPLICATION comparison_expr
+check_def: constraint_def CHECK comparison_expr
 {
 	@$ = @3;
 }
-	| WITH_CHECK CONSTRAINT obj_name CHECK comparison_expr
+	| constraint_def CHECK NOT_FOR_REPLICATION comparison_expr
 {
-	@$ = @5;
+	@$ = @4;
 }
-	| WITH_NOCHECK CONSTRAINT obj_name CHECK comparison_expr
+	| WITH_CHECK constraint_def CHECK comparison_expr
 {
-	@$ = @5;
+	@$ = @4;
+}
+	| WITH_NOCHECK constraint_def CHECK comparison_expr
+{
+	@$ = @4;
 }
 ;
 

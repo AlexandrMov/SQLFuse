@@ -54,6 +54,7 @@
 #define EEXEC 0x122
 #define EERES 0x123
 #define EENOTFOUND 0x221
+#define EEPARSE 0x222
 
 struct sqlctx {
   char *appname;
@@ -91,6 +92,15 @@ struct sqlfs_ms_column {
   char *seed_val;
   char *inc_val;
 
+  char *def;
+};
+
+struct sqlfs_ms_constraint {
+  union {
+    char *column_name;
+    int disabled;
+  };
+  
   char *def;
 };
 
@@ -133,6 +143,7 @@ struct sqlfs_ms_obj {
     struct sqlfs_ms_fk *foreign_ctrt;
     struct sqlfs_ms_type *mstype;
     struct sqlfs_ms_index *index;
+    struct sqlfs_ms_constraint *clmn_ctrt;
   };
   unsigned int len;
   time_t ctime;
@@ -179,14 +190,14 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
 /*
  * Создать/записать объект
  */
-int write_ms_object(const char *schema, const struct sqlfs_ms_obj *parent,
-		    const char *text, struct sqlfs_ms_obj *obj);
+void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
+		     const char *text, struct sqlfs_ms_obj *obj, GError **error);
 
 /*
  * Удалить объект
  */
-int remove_ms_object(const char *schema, const char *parent,
-		     struct sqlfs_ms_obj *obj);
+void remove_ms_object(const char *schema, const char *parent,
+		      struct sqlfs_ms_obj *obj, GError **error);
 
 /*
  * Убрать за объектом
