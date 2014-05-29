@@ -10,7 +10,7 @@ OBJ_FILES	:= main.o
 # MSSQL
 MSSQL_PREFIX	:= ./mssql/
 MSSQL_FILES	:= mssqlfs.c tsqlcheck.c exec.c table.c util.c
-MSSQL_GEN_FILES	:= tsql.tab.c tsql.parser.c tsql.tab.h
+MSSQL_GEN_FILES	:= tsql.tab.c tsql.parser.c tsql.tab.h tsql.parser.h
 MSSQL_OBJS	:= tsql.tab.o tsql.parser.o mssqlfs.o tsqlcheck.o
 MSSQL_OBJS	+= exec.o table.o util.o
 SRC_FILES	+= $(addprefix $(MSSQL_PREFIX), $(MSSQL_FILES))
@@ -45,7 +45,7 @@ mssql/tsql.%.o: tsql.%.c
 	$(CC) $< -c -o $@ -pipe
 
 mssql/tsql.parser.c: tsql.l
-	$(LEX) --outfile=$(addprefix $(MSSQL_PREFIX), tsql.parser.c) $<
+	$(LEX) --outfile=$(addprefix $(MSSQL_PREFIX), tsql.parser.c) --header-file=$(addprefix $(MSSQL_PREFIX), tsql.parser.h) $<
 
 mssql/tsql.tab.c: tsql.y
 	$(YACC) $<

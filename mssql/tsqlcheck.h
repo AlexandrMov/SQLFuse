@@ -1,6 +1,24 @@
 #ifndef TSQLCHECK_H
 #define TSQLCHECK_H
 
+#define TOKEN_POS(t) int first_column##t, int first_line##t, \
+    int last_column##t, int last_line##t
+#define TOKEN_POS_T(t) int first_column##t, first_line##t, \
+    last_column##t, last_line##t
+
+typedef struct module_mode {
+  unsigned int make_type;
+
+  TOKEN_POS_T(m);
+} mod_node_t;
+
+
+typedef struct check_node {
+  unsigned int check;
+  unsigned int not4repl;
+  
+} check_node_t;
+
 /*
  * Лист синтаксического дерева
  */
@@ -9,13 +27,15 @@ typedef struct objnode {
   
   char *objname;
   char *schema;
+
+  union {
+    mod_node_t *module_node;
+    check_node_t *check_node;
+  };
   
-  int first_column;
-  int first_line;
-  int last_column;
-  int last_line;
-  
+  TOKEN_POS_T();
 } objnode_t;
+
 
 /*
  *
@@ -30,7 +50,7 @@ void init_checker();
  * должна вызываться end_checker()
  *
  */
-int start_checker();
+void start_checker();
 
 /*
  *
@@ -38,8 +58,21 @@ int start_checker();
  * токен в синтаксическое дерево
  *
  */
-int put_node(unsigned int type, char *schema, char *objname,
-	     int fc, int fl, int lc, int ll);
+void put_node(unsigned int type, char *schema, char *objname, TOKEN_POS());
+
+
+void put_column(char *schema, char *objname, TOKEN_POS());
+
+
+void put_module(unsigned int make_type, TOKEN_POS(m),
+		unsigned int module_type, char *schema, char *objname,
+		TOKEN_POS(t));
+
+
+void put_default(char *schema, char *objname, TOKEN_POS());
+
+
+void put_check(unsigned int check, unsigned int not4repl, TOKEN_POS());
 
 /*
  *
@@ -53,7 +86,7 @@ objnode_t * get_node();
  * Завершение парсинга
  *
  */
-int end_checker();
+void end_checker();
 
 /*
  *

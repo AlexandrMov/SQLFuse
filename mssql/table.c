@@ -32,6 +32,7 @@ char * create_constr_def(const char *schema, const char *table,
   g_string_append_printf(sql, "ALTER TABLE [%s].[%s]", schema, table);
   if (obj->object_id) {
     g_string_append_printf(sql, " DROP CONSTRAINT [%s] \n", obj->name);
+    g_string_append_printf(sql, "ALTER TABLE [%s].[%s]", schema, table);
   }
 
   if (obj->type == R_C && obj->clmn_ctrt) {
@@ -46,12 +47,12 @@ char * create_constr_def(const char *schema, const char *table,
   if (obj->type == R_C)
     g_string_append_printf(sql, " CHECK %s", def);
 
-  if (obj->type == R_D && obj->clmn_ctrt) {
-    g_string_append_printf(sql, " DEFAULT %s FOR [%s]",
-			   obj->clmn_ctrt->column_name);
+  if (obj->type == R_D) {
+    g_string_append_printf(sql, " DEFAULT ", def);
   }
 
   result = g_strdup(sql->str);
+  g_message("constr: %s\n", result);
   g_string_free(sql, TRUE);
   
   return result;

@@ -382,7 +382,7 @@ static int sqlfs_write(const char *path, const char *buf, size_t size,
   if (fsfile && fsfile->buffer) {
     size_t len = strlen(fsfile->buffer);
     if (len < size + offset)
-      fsfile->buffer = g_realloc_n(fsfile->buffer, size + offset + 2,
+      fsfile->buffer = g_realloc_n(fsfile->buffer, size + offset + 1,
 				   sizeof(gchar ));
     g_strlcpy(fsfile->buffer + offset, buf, size + 1);
     fsfile->flush = 1;

@@ -1,11 +1,10 @@
-%code top {
+%{
   #include <stdio.h>
   #include <string.h>
-
   #include "tsqlcheck.h"
-}
+%}
 
-%code requires {
+%code requires{
       struct node_obj {
       	 char *dbname;
 	 char *schema;
@@ -26,6 +25,7 @@
      return wrapRet;
   }  
 %}
+
 %locations
 
 %token<sval> NAME STRING
@@ -44,6 +44,7 @@
 %token<ival> FOREIGN_KEY REFERENCES PRIMARY_KEY
 
 %type<nodeobj> index_def obj_name data_type clust_idx_def
+%type<ival> mk_def
 
 %start input
 
@@ -64,12 +65,6 @@ input: column_def
 	| type_def
 	| constraint_def default_def
 	| check_def
-{
-	put_node(CHECK, NULL, NULL,
-		 @1.first_column, @1.first_line,
-		 @1.last_column, @1.last_line);
-	YYACCEPT;
-}
 	| constraint_def foreign_def
 	| constraint_def primary_def
 ;
@@ -98,36 +93,44 @@ foreign_def: FOREIGN_KEY '(' NAME ')'
 
 proc_def: mk_def PROC obj_name
 {
-	put_node(PROC, $3.schema, $3.objname,
-		 @3.first_column, @3.first_line,
-	      	 @3.last_column, @3.last_line);
+	put_module($1, @1.first_column, @1.first_line,
+	      	   @1.last_column, @1.last_line,
+		   PROC, $3.schema, $3.objname,
+		   @3.first_column, @3.first_line,
+	      	   @3.last_column, @3.last_line);
 	YYACCEPT;
 }
 ;
 
 func_def: mk_def FUNCTION obj_name
 {
-	put_node(FUNCTION, $3.schema, $3.objname,
-		 @3.first_column, @3.first_line,
-	      	 @3.last_column, @3.last_line);
+	put_module($1, @1.first_column, @1.first_line,
+	      	   @1.last_column, @1.last_line,
+		   FUNCTION, $3.schema, $3.objname,
+		   @3.first_column, @3.first_line,
+	      	   @3.last_column, @3.last_line);
 	YYACCEPT;
 }
 ;
 
 trg_def: mk_def TRIGGER obj_name ONX obj_name
 {
-	put_node(TRIGGER, $3.schema, $3.objname,
-		 @3.first_column, @3.first_line,
-	      	 @3.last_column, @3.last_line);
+	put_module($1, @1.first_column, @1.first_line,
+	      	   @1.last_column, @1.last_line,
+		   TRIGGER, $3.schema, $3.objname,
+		   @3.first_column, @3.first_line,
+	      	   @3.last_column, @3.last_line);
 	YYACCEPT;
 }
 ;
 
 view_def: mk_def VIEW obj_name
 {
-	put_node(VIEW, $3.schema, $3.objname,
-		 @3.first_column, @3.first_line,
-	      	 @3.last_column, @3.last_line);
+	put_module($1, @1.first_column, @1.first_line,
+	      	   @1.last_column, @1.last_line,
+		   VIEW, $3.schema, $3.objname,
+		   @3.first_column, @3.first_line,
+	      	   @3.last_column, @3.last_line);
 	YYACCEPT;
 }
 ;
@@ -176,28 +179,37 @@ mk_def: CREATE
 
 check_def: constraint_def CHECK comparison_expr
 {
-	@$ = @3;
+	put_check(WITH_CHECK, 0, @3.first_column, @3.first_line,
+	      	  @3.last_column, @3.last_line);
+	YYACCEPT;
 }
 	| constraint_def CHECK NOT_FOR_REPLICATION comparison_expr
 {
-	@$ = @4;
+	put_check(WITH_CHECK, NOT_FOR_REPLICATION,
+	   	  @4.first_column, @4.first_line,
+	      	  @4.last_column, @4.last_line);
+  	YYACCEPT;
 }
 	| WITH_CHECK constraint_def CHECK comparison_expr
 {
-	@$ = @4;
+	put_check(WITH_CHECK, 0, @4.first_column, @4.first_line,
+	      	  @4.last_column, @4.last_line);
+	YYACCEPT;
 }
 	| WITH_NOCHECK constraint_def CHECK comparison_expr
 {
-	@$ = @4;
+	put_check(WITH_NOCHECK, 0, @4.first_column, @4.first_line,
+	      	  @4.last_column, @4.last_line);
+	YYACCEPT;
 }
 ;
 
 
 default_def: DEFAULT const_expr FOR obj_name
 {
-	put_node(DEFAULT, $4.schema, $4.objname,
-		 @4.first_column, @4.first_line,
-		 @4.last_column, @4.last_line);
+	put_default($4.schema, $4.objname,
+		    @2.first_column, @2.first_line,
+		    @2.last_column, @2.last_line);
 	YYACCEPT;
 }
 
@@ -235,9 +247,9 @@ scalar_exp_commalist: scalar_exp
 
 column_def: COLUMN obj_name data_type column_def_opt_list
 {
-	put_node(COLUMN, $3.schema, $3.objname,
-		 @3.first_column, @3.first_line,
-		 @3.last_column, @3.last_line);
+	put_column($3.schema, $3.objname,
+		   @3.first_column, @3.first_line,
+		   @3.last_column, @3.last_line);
 		 
 	YYACCEPT;
 }

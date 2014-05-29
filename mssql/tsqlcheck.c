@@ -1,6 +1,18 @@
 #include <glib.h>
 
 #include "tsqlcheck.h"
+#include "tsql.tab.h"
+
+#define TOKEN_POS_A(t) first_column##t, first_line##t, \
+    last_column##t, last_line##t
+
+#define TOKEN_POS_ASSIGN(dest) TOKEN_POS_ASSIGN_N(dest, )
+
+#define TOKEN_POS_ASSIGN_N(dest, t) \
+  dest->first_line##t = first_line##t; \
+  dest->first_column##t = first_column##t; \
+  dest->last_line##t = last_line##t; \
+  dest->last_column##t = last_column##t;
 
 struct tsql_checker {
   objnode_t *node;
@@ -17,7 +29,7 @@ void init_checker()
   }
 }
 
-int start_checker()
+void start_checker()
 {
   if (!checker->node)
     checker->node = g_try_new0(objnode_t, 1);
@@ -25,48 +37,80 @@ int start_checker()
   g_mutex_lock(&checker->lock);
 }
 
-int put_node(unsigned int type, char *schema, char *objname,
-	     int fc, int fl, int lc, int ll)
+void put_node(unsigned int type, char *schema, char *objname, TOKEN_POS())
 {
   if (checker->node == NULL) {
     checker->node = g_try_new0(objnode_t, 1);
   }
 
   if (checker->node != NULL) {
-    checker->node->first_line = fl;
-    checker->node->first_column = fc;
-    checker->node->last_line = ll;
-    checker->node->last_column = lc;
+    TOKEN_POS_ASSIGN(checker->node);
     
     if (schema != NULL)
       checker->node->schema = g_strdup(schema);
+
+    if (objname != NULL)
+      checker->node->objname = g_strdup(objname);
     
-    checker->node->objname = g_strdup(objname);
     checker->node->type = type;
   }
-
-  return 0;
 }
+
+void put_column(char *schema, char *objname, TOKEN_POS())
+{
+  put_node(COLUMN, schema, objname, TOKEN_POS_A());
+}
+
+void put_module(unsigned int make_type, TOKEN_POS(m),
+		unsigned int module_type, char *schema, char *objname,
+		TOKEN_POS(t))
+{
+  put_node(module_type, schema, objname, TOKEN_POS_A(t));
+  
+  checker->node->module_node = g_try_new0(mod_node_t , 1);
+  checker->node->module_node->make_type = make_type;
+
+  TOKEN_POS_ASSIGN_N(checker->node->module_node, m);
+}
+
+void put_default(char *schema, char *objname, TOKEN_POS())
+{
+  put_node(DEFAULT, schema, objname, TOKEN_POS_A());
+}
+
+
+void put_check(unsigned int check, unsigned int not4repl, TOKEN_POS())
+{
+  put_node(CHECK, NULL, NULL, TOKEN_POS_A());
+  checker->node->check_node = g_try_new0(check_node_t, 1);
+  checker->node->check_node->check = check;
+  checker->node->check_node->not4repl = not4repl;
+}
+
 
 objnode_t * get_node() {
   return checker->node;
 }
 
-int end_checker()
+void end_checker()
 {
-  if (checker->node != NULL) {
+  /*if (checker->node != NULL) {
     if (checker->node->schema != NULL)
       g_free(checker->node->schema);
 
     if (checker->node->objname != NULL)
       g_free(checker->node->objname);
+
+    if (checker->node->module_node != NULL)
+      g_free(checker->node->module_node);
+
+    if (checker->node->check_node != NULL)
+      g_free(checker->node->check_node);
     
     g_free(checker->node);
-  }
+    }*/
 
   g_mutex_unlock(&checker->lock);
-
-  return 0;
 }
 
 void close_checker()

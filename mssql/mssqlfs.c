@@ -3,6 +3,7 @@
 #include "exec.h"
 #include "tsqlcheck.h"
 #include "tsql.tab.h"
+#include "tsql.parser.h"
 #include "table.h"
 
 static int msg_handler(DBPROCESS *dbproc, DBINT msgno, int msgstate, int severity,
@@ -100,8 +101,10 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
   int error = 0;
   GError *terr = NULL;
   start_checker();
-  
-  yy_scan_string(text);
+
+  YY_BUFFER_STATE bp;
+  bp = yy_scan_string(g_strconcat(text, "\0", NULL));
+  yy_switch_to_buffer(bp);  
   error = yyparse();
   objnode_t *node = NULL;
   
@@ -117,6 +120,16 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       break;
     case CHECK:
       obj->type = R_C;
+      if (node->check_node != NULL) {
+	obj->clmn_ctrt = g_try_new0(struct sqlfs_ms_constraint, 1);
+	if (node->check_node->check == WITH_CHECK)
+	  obj->clmn_ctrt->disabled = 0;
+	else
+	  obj->clmn_ctrt->disabled = 1;
+      }
+      wrktext = create_constr_def(schema, parent->name, obj,
+				  text + node->first_column - 1);
+      break;
     case DEFAULT:
       obj->type = R_D;
       wrktext = create_constr_def(schema, parent->name, obj,
@@ -133,7 +146,9 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
   else {
     g_set_error(&terr, EEPARSE, EEPARSE, NULL);
   }
-  
+
+  yy_flush_buffer(bp);
+  yy_delete_buffer(bp);
   end_checker();
 
   if (terr != NULL)
