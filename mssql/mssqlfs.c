@@ -249,7 +249,8 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
-	g_string_append_printf(sql, g_convert(def_buf, strlen(def_buf), "UTF-8", "CP1251", NULL, NULL, NULL));
+	g_string_append_printf(sql, g_convert(def_buf, strlen(def_buf), "UTF-8", "CP1251",
+					      NULL, NULL, &terr));
 	break;
       case BUF_FULL:
 	break;
@@ -287,7 +288,7 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
   switch(obj->type) {
   case R_COL:
     if (obj->column)
-      def = g_strdup(obj->column->def);      
+      def = g_strdup(obj->column->def);
     break;
   case R_C:
   case R_D:
