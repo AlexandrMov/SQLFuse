@@ -70,13 +70,11 @@ static int err_handler(DBPROCESS * dbproc, int severity, int dberr, int oserr,
 }
 
 
-int init_msctx(struct sqlctx *ctx)
+void init_msctx(struct sqlctx *ctx, GError **error)
 {
-  int error = init_context(ctx, err_handler, msg_handler);
+  init_context(ctx, err_handler, msg_handler, error);
   initobjtypes();
   init_checker();
-  
-  return error;
 }
 
 struct sqlfs_ms_obj * find_ms_object(const struct sqlfs_ms_obj *parent,
@@ -511,13 +509,9 @@ void free_ms_obj(gpointer msobj)
   g_free(obj);
 }
 
-int close_msctx()
+void close_msctx(GError **error)
 {
-  int error = 0;
-
   close_checker();
-  error = close_context();
+  close_context(error);
   dbexit();
-  
-  return error;
 }

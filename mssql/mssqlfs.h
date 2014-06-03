@@ -174,7 +174,7 @@ struct sqlfs_ms_obj {
 /*
  * Инициализировать контекст
  */
-int init_msctx(struct sqlctx *ctx);
+void init_msctx(struct sqlctx *ctx, GError **error);
 
 /*
  * Найти объект
@@ -226,7 +226,7 @@ void free_ms_obj(gpointer msobj);
 /*
  * Закончить работу с контекстом
  */
-int close_msctx();
+void close_msctx(GError **error);
 
   
 #endif

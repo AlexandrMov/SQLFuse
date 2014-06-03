@@ -32,8 +32,8 @@ typedef struct {
  * Инициализация контекста
  *
  */
-int init_context(const struct sqlctx *sqlctx, gpointer err_handler,
-		 gpointer msg_handler);
+void init_context(const struct sqlctx *sqlctx, gpointer err_handler,
+		 gpointer msg_handler, GError **error);
 
 /*
  *
@@ -54,4 +54,4 @@ void close_sql(msctx_t *context);
  * Закрытие контекста
  *
  */
-int close_context();
+void close_context(GError **error);
