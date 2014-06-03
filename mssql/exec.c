@@ -97,7 +97,8 @@ int init_context(const struct sqlctx *sqlctx,
       }
 
       if (!error) {
-	DBSETLNATLANG(msctx->login, "english");
+	//DBSETLNATLANG(msctx->login, "english");
+	DBSETLCHARSET(msctx->login, "CP1251");
 	DBSETLUSER(msctx->login, sqlctx->username);
 	DBSETLPWD(msctx->login, sqlctx->password);
 	DBSETLAPP(msctx->login, sqlctx->appname);

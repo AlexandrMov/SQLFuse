@@ -110,7 +110,7 @@ static struct sqlfs_ms_obj * find_object(const char *pathname, GError **error)
       
       if (!terr) {
 	
-	if (obj && obj->name) {	  
+	if (obj && obj->name) {
 	  list = g_list_append(list, obj);
 	  if (!g_hash_table_contains(cache.cache_table, path->str)) {
 	    g_mutex_lock(&cache.m);
@@ -172,7 +172,7 @@ static int sqlfs_getattr(const char *path, struct stat *stbuf)
 	stbuf->st_mode = S_IFDIR | 0755;
 	stbuf->st_nlink = 2;
       } else {
-	stbuf->st_mode = S_IFREG | 0666;
+	stbuf->st_mode = S_IFREG | 0777;
 	stbuf->st_nlink = 1;
 	stbuf->st_size = object->len;
       }
@@ -351,9 +351,9 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
   } else if ((fi->flags & O_ACCMODE) == O_RDWR
 	     || (fi->flags & O_ACCMODE) == O_WRONLY)
     {
-      if (fi->flags & O_APPEND) {
+      /*if (fi->flags & O_APPEND) {
 	err = -ENOTSUP;
-      }
+      }*/
       
       if ((fi->flags & O_EXCL) && object->object_id)
 	  err = -EACCES;

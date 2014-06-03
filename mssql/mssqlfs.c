@@ -122,7 +122,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
   start_checker();
 
   YY_BUFFER_STATE bp;
-  bp = yy_scan_string(g_strconcat(text, "\0", NULL));
+  bp = yy_scan_string(text);
   yy_switch_to_buffer(bp);  
   error = yyparse();
   objnode_t *node = NULL;
@@ -249,7 +249,7 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
-	g_string_append(sql, def_buf);
+	g_string_append_printf(sql, g_convert(def_buf, strlen(def_buf), "UTF-8", "CP1251", NULL, NULL, NULL));
 	break;
       case BUF_FULL:
 	break;
@@ -340,7 +340,7 @@ GList * fetch_schema_obj(int schema_id, const char *name,
   g_string_append(sql, "SELECT so.object_id, so.name, so.type");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, so.create_date)");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, so.modify_date) ");
-  g_string_append(sql, ", LEN(sm.definition) ");
+  g_string_append(sql, ", DATALENGTH(sm.definition) ");
   g_string_append(sql, "FROM sys.objects so LEFT JOIN sys.sql_modules sm");
   g_string_append(sql, " ON sm.object_id = so.object_id");
   g_string_append_printf(sql, " WHERE schema_id = %d", schema_id);
