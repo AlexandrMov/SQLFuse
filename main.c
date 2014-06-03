@@ -110,7 +110,7 @@ static struct sqlfs_ms_obj * find_object(const char *pathname, GError **error)
       
       if (!terr) {
 	
-	if (obj && obj->name) {	  
+	if (obj && obj->name) {
 	  list = g_list_append(list, obj);
 	  if (!g_hash_table_contains(cache.cache_table, path->str)) {
 	    g_mutex_lock(&cache.m);
@@ -558,18 +558,25 @@ int main (int argc, char **argv)
 
   if (fuse_opt_parse(&args, msctx, sqlfs_opts, sqlfs_opt_proc) == -1)
     exit(1);
-
-  if (init_msctx(msctx)) {
+    
+  GError *terr = NULL;
+  init_msctx(msctx, &terr);
+  if (terr != NULL) {
     exit(1);
   }
+  
   g_free(msctx->appname);
   g_free(msctx);
   
   res = sqlfs_fuse_main(&args);
   fuse_opt_free_args(&args);
 
-  close_msctx();
+  close_msctx(&terr);
   g_mutex_clear(&cache.m);
+  
+  if (terr != NULL) {
+    exit(2);
+  }
   
   return res;
 }

@@ -51,21 +51,20 @@ static gboolean do_exec_sql(const char *sql, const msctx_t *ctx, GError **err)
   return TRUE;
 }
 
-int init_context(const struct sqlctx *sqlctx,
-		 gpointer err_handler, gpointer msg_handler)
+void init_context(const struct sqlctx *sqlctx,
+		  gpointer err_handler, gpointer msg_handler, GError **error)
 {
-  if (!sqlctx)
-    return EENULL;
-  
   if (!sqlctx->appname || !sqlctx->servername
       || !sqlctx->username || !sqlctx->dbname) {
-    return EENULL;
+    return ;
   }
   
+  GError *terr = NULL;  
   RETCODE erc;
   if (dbinit() == FAIL) {
-    g_printerr("%s:%d: dbinit() failed\n", sqlctx->appname, __LINE__);
-    return EEINIT;
+    g_set_error(&terr, EEINIT, EEINIT, "%s:%d: dbinit() failed\n",
+		sqlctx->appname, __LINE__);
+    return ;
   }
 
   dberrhandle(err_handler);
@@ -75,15 +74,13 @@ int init_context(const struct sqlctx *sqlctx,
     ectx = g_try_new0(exectx_t, 1);
   }
   
-  int error = 0;
-
   if (ectx) {
     ectx->ctx = g_memdup(sqlctx, sizeof(*sqlctx));
   }
   else
-    error = EEMEM;
+    g_set_error(&terr, EEMEM, EEMEM, NULL);
 
-  if (!error) {
+  if (terr == NULL) {
 
     int i;
     msctx_t *msctx = NULL;
@@ -91,33 +88,31 @@ int init_context(const struct sqlctx *sqlctx,
       msctx = g_try_new0(msctx_t, 1);
     
       if ((msctx->login = dblogin()) == NULL) {
-	g_printerr("%s:%d: unable to allocate login structure\n",
-		   sqlctx->appname, __LINE__);
-	error = EELOGIN;
+	g_set_error(&terr, EELOGIN, EELOGIN, "%s:%d: unable to allocate login structure\n",
+		    sqlctx->appname, __LINE__);
       }
 
-      if (!error) {
-	DBSETLNATLANG(msctx->login, "english");
+      if (terr == NULL) {
+	//DBSETLNATLANG(msctx->login, "english");
+	DBSETLCHARSET(msctx->login, "CP1251");
 	DBSETLUSER(msctx->login, sqlctx->username);
 	DBSETLPWD(msctx->login, sqlctx->password);
 	DBSETLAPP(msctx->login, sqlctx->appname);
 
 	if ((msctx->dbproc = dbopen(msctx->login, sqlctx->servername)) == NULL) {
-	  g_printerr("%s:%d: unable to connect to %s as %s\n",
-		     sqlctx->appname, __LINE__,
-		     sqlctx->servername, sqlctx->username);
-	  error = EECONN;
+	  g_set_error(&terr, EECONN, EECONN, "%s:%d: unable to connect to %s as %s\n",
+		      sqlctx->appname, __LINE__,
+		      sqlctx->servername, sqlctx->username);
 	}
 
-	if (!error && sqlctx->dbname
+	if (terr == NULL && sqlctx->dbname
 	    && (erc = dbuse(msctx->dbproc, sqlctx->dbname)) == FAIL) {
-	  g_printerr("%s:%d: unable to use to database %s\n",
-		     sqlctx->appname, __LINE__, sqlctx->dbname);
-	  error = EEUSE;
+	  g_set_error(&terr, EEUSE, EEUSE, "%s:%d: unable to use to database %s\n",
+		      sqlctx->appname, __LINE__, sqlctx->dbname);
 	}
       }
 
-      if (!error) {
+      if (terr == NULL) {
 	g_mutex_init(&msctx->lock);
 	ectx->ctxlist = g_slist_append(ectx->ctxlist, msctx);
       }
@@ -125,10 +120,10 @@ int init_context(const struct sqlctx *sqlctx,
 	g_free(msctx);
       }
     }
-    
   }
-
-  return error;
+  
+  if (terr != NULL)
+	g_propagate_error(error, terr);
 }
 
 msctx_t * exec_sql(const char *sql, GError **error)
@@ -215,9 +210,9 @@ void close_sql(msctx_t *context)
   g_mutex_unlock(&context->lock);
 }
 
-int close_context()
+void close_context(GError **error)
 {
-  int error = 0;
+  GError *terr = NULL;
   int i, len = g_slist_length(ectx->ctxlist);
   msctx_t *wrkctx = NULL;
   GSList *list = ectx->ctxlist;
@@ -231,12 +226,13 @@ int close_context()
 	dbclose(wrkctx->dbproc);
       }
       else {
-	error = EEBUSY;
+	g_set_error(&terr, EEBUSY, EEBUSY, NULL);
       }
       
     }
     list = g_slist_remove(list, wrkctx);
   }
 
-  return error;
+  if (terr != NULL)
+    g_propagate_error(error, terr);
 }
