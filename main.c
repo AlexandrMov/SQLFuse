@@ -351,9 +351,9 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
   } else if ((fi->flags & O_ACCMODE) == O_RDWR
 	     || (fi->flags & O_ACCMODE) == O_WRONLY)
     {
-      /*if (fi->flags & O_APPEND) {
+      if (fi->flags & O_APPEND) {
 	err = -ENOTSUP;
-	}*/
+      }
       
       if ((fi->flags & O_EXCL) && object->object_id)
 	  err = -EACCES;
