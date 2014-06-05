@@ -351,9 +351,9 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
   } else if ((fi->flags & O_ACCMODE) == O_RDWR
 	     || (fi->flags & O_ACCMODE) == O_WRONLY)
     {
-      if (fi->flags & O_APPEND) {
+      /*if (fi->flags & O_APPEND) {
 	err = -ENOTSUP;
-      }
+	}*/
       
       if ((fi->flags & O_EXCL) && object->object_id)
 	  err = -EACCES;
@@ -475,20 +475,12 @@ static int sqlfs_unlink(const char *path)
   if (!err) {
     GError *terr = NULL;
     struct sqlfs_ms_obj *object = find_object(path, &terr);
-    if (!object) {
-      err = -EIO;
+    if (object != NULL && !object->object_id) {
+	err = -ENOENT;
     }
 
-    if (!err && !object->object_id)
-      err = -ENOENT;
-    
     remove_ms_object(*schema, *(schema + 1), object, &terr);
-    if (terr != NULL)
-      err = -EIO;
-
-    if (!err) {
-      SAFE_REMOVE_ALL(path);
-    }
+    SAFE_REMOVE_ALL(path);
   }
 
   if (g_strv_length(schema) > 0) {
@@ -502,6 +494,7 @@ static int sqlfs_unlink(const char *path)
 static int sqlfs_truncate(const char *path, off_t offset)
 {
   int err = 0;
+
   if (offset == 0) {
     err = sqlfs_unlink(path);
     if (!err)
