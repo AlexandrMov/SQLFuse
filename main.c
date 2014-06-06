@@ -404,8 +404,8 @@ static int sqlfs_write(const char *path, const char *buf, size_t size,
       fsfile->buffer = g_realloc_n(fsfile->buffer, size + offset + 1,
 				   sizeof(gchar ));
     g_strlcpy(fsfile->buffer + offset, buf, size + 1);
-    fsfile->flush = 1;
     err = size;
+    fsfile->flush = TRUE;
   }
   else
     err = -ENOENT;
@@ -418,13 +418,8 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
   int err = 0;
   sqlfs_file_t *fsfile = g_hash_table_lookup(cache.open_table, &(fi->fh));
   if (!fsfile)
-    err = -ENOENT;
-
-  if (!err && !fsfile->flush) {
-    g_hash_table_remove(cache.open_table, &(fi->fh));
-    return 0;
-  }
-
+    return -ENOENT;
+  
   gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
   if (schema == NULL)
     err = -EFAULT;
@@ -437,13 +432,11 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
 
     if (!obj)
       obj->name = g_path_get_basename(path);
-    
-    if (!fsfile->buffer)
-      err = -EFAULT;
-    else {
-      write_ms_object(*schema, pobj, fsfile->buffer,
-		      obj, &terr);
-      SAFE_REMOVE_ALL(path);
+
+
+    if (fsfile->flush == TRUE && strlen(fsfile->buffer) > 0) {
+      write_ms_object(*schema, pobj, fsfile->buffer, obj, &terr);
+      fsfile->flush = FALSE;
     }
 
     if (terr != NULL)
@@ -452,8 +445,21 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
     g_free(pp);
   }
 
+  if (schema != NULL)
+    g_strfreev(schema);
+  
+  return err;
+}
+
+static int sqlfs_release(const char *path, struct fuse_file_info *fi)
+{
+  int err = 0;
+
+  sqlfs_file_t *fsfile = g_hash_table_lookup(cache.open_table, &(fi->fh));
+  if (!fsfile)
+    err = -ENOENT;
+
   g_hash_table_remove(cache.open_table, &(fi->fh));
-  g_strfreev(schema);
   
   return err;
 }
@@ -469,20 +475,12 @@ static int sqlfs_unlink(const char *path)
   if (!err) {
     GError *terr = NULL;
     struct sqlfs_ms_obj *object = find_object(path, &terr);
-    if (!object) {
-      err = -EIO;
+    if (object != NULL && !object->object_id) {
+	err = -ENOENT;
     }
 
-    if (!err && !object->object_id)
-      err = -ENOENT;
-    
     remove_ms_object(*schema, *(schema + 1), object, &terr);
-    if (terr != NULL)
-      err = -EIO;
-
-    if (!err) {
-      SAFE_REMOVE_ALL(path);
-    }
+    SAFE_REMOVE_ALL(path);
   }
 
   if (g_strv_length(schema) > 0) {
@@ -496,6 +494,7 @@ static int sqlfs_unlink(const char *path)
 static int sqlfs_truncate(const char *path, off_t offset)
 {
   int err = 0;
+
   if (offset == 0) {
     err = sqlfs_unlink(path);
     if (!err)
@@ -531,6 +530,7 @@ static struct fuse_operations sqlfs_oper = {
   .unlink = sqlfs_unlink,
   .truncate = sqlfs_truncate,
   .flush = sqlfs_flush,
+  .release = sqlfs_release,
 };
 
 static int sqlfs_fuse_main(struct fuse_args *args)
