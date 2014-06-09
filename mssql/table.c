@@ -113,7 +113,7 @@ char * make_column_def(const struct sqlfs_ms_obj *obj)
   if (!col->nullable)
     g_string_append(def, " NOT NULL");
   
-  text = g_strdup(def->str);
+  text = g_strconcat(def->str, "\n", NULL);
   g_string_free(def, TRUE);
 
   return text;
@@ -321,7 +321,7 @@ char * make_constraint_def(const struct sqlfs_ms_obj *ctrt, const char *def)
 			     ctrt->name, def);
     }
 
-  text = g_strdup(sql->str);
+  text = g_strconcat(sql->str, "\n", NULL);
   g_string_free(sql, TRUE);
   
   return text;
