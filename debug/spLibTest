@@ -4,6 +4,6 @@
 CREATE PROCEDURE dbo.spLibTest
 AS
 BEGIN
-    SELECT '13'
+    SELECT 'Привет всем, это русский текст!'
     SELECT 'hello'
 END
