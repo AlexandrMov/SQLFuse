@@ -73,6 +73,8 @@ void put_node(unsigned int type, char *schema, char *objname, TOKEN_POS())
     
     checker->node->type = type;
   }
+
+  reset_column();
 }
 
 void put_column(char *schema, char *objname, TOKEN_POS())

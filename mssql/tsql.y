@@ -38,11 +38,12 @@
 }
 
 %{
-  int wrapRet = 1;
+  int yycolumn = 1;
   int yylex(void);
-  int yywrap( void ) {
-     return wrapRet;
-  }  
+
+  void reset_column() {
+    yycolumn = 1;
+  }
 %}
 
 %locations
