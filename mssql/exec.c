@@ -18,6 +18,7 @@
 */
 
 #include "exec.h"
+#include <string.h>
 
 
 typedef struct {
@@ -30,7 +31,9 @@ exectx_t *ectx;
 
 static gboolean do_exec_sql(const char *sql, const msctx_t *ctx, GError **err)
 {
-  if ((dbcmd(ctx->dbproc, sql) == FAIL)) {
+  gchar *sqlconv = g_convert(sql, strlen(sql), "CP1251", "UTF-8",
+			     NULL, NULL, err); 
+  if ((dbcmd(ctx->dbproc, sqlconv) == FAIL)) {
     g_set_error(err, EECMD, EECMD,
 		"%d: dbcmd() failed\n", __LINE__);
     return FALSE;
@@ -47,6 +50,9 @@ static gboolean do_exec_sql(const char *sql, const msctx_t *ctx, GError **err)
 		"%d: dbresults() failed\n", __LINE__);
     return FALSE;
   }
+
+  if (sqlconv != NULL)
+    g_free(sqlconv);
 
   return TRUE;
 }
