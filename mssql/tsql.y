@@ -50,9 +50,11 @@
 %token<sval> NAME STRING
 %token<ival> INTNUM
 
+%nonassoc CREATE ALTER TRIGGER ONX
+%left COMPARISON
 %left '+' '-'
 %left '*' '/'
-%left COMPARISON
+%nonassoc '(' ')'
 
 %token<ival> CREATE ALTER INDEX UNIQUE FUNCTION CONSTRAINT
 %token<ival> CLUSTERED NONCLUSTERED TYPE VIEW SCHEMA TRIGGER
