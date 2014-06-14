@@ -82,7 +82,7 @@ REFERENCES	{ return REFERENCES; }
 
 [0-9]+ 		|
 [0-9]+"."[0-9]*	|
-"."[0-9]*		{ yylval.ival = atoi(yytext); return INTNUM; }
+"."[0-9]+		{ yylval.ival = atoi(yytext); return INTNUM; }
 
 [0-9]+[eE][+-]?[0-9]+	      	|
 [0-9]+"."[0-9]*[eE][+-]?[0-9]+ 	|

@@ -152,6 +152,31 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       wrktext = create_constr_def(schema, parent->name, obj,
 				  text + node->first_column - 1);
       break;
+    case PROC:
+    case FUNCTION:
+    case VIEW:
+    case TRIGGER: {
+      GString *sql = g_string_new(NULL);
+      g_string_append_len(sql, text, node->module_node->first_columnm - 1);
+      if (obj->object_id)
+	g_string_append(sql, "ALTER ");
+      else
+	g_string_append(sql, "CREATE");
+      
+      g_string_append_len(sql, text + node->module_node->last_columnm,
+			  node->first_column - node->module_node->last_columnm - 1);
+      g_string_append_printf(sql, "%s.%s", schema, obj->name);
+      
+      if (node->type == TRIGGER) {
+	g_string_append_printf(sql, " ON %s.%s", schema, parent->name);
+      }
+      
+      g_string_append(sql, text + node->last_column);
+      wrktext = g_strdup(sql->str);
+      
+      g_string_free(sql, TRUE);
+    }
+      break;
     default:
       wrktext = g_strdup(text);
     }
@@ -207,6 +232,7 @@ void remove_ms_object(const char *schema, const char *parent,
       break;
     case R_TR:
       g_string_append(sql, "TRIGGER");
+      break;
     default:
       g_set_error(&terr, EENOTSUP, EENOTSUP, NULL);
     }

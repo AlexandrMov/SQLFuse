@@ -51,9 +51,9 @@
 %token<sval> NAME STRING
 %token<ival> INTNUM
 
+%left COMPARISON
 %left '+' '-'
 %left '*' '/'
-%left COMPARISON
 
 %token<ival> CREATE ALTER INDEX UNIQUE FUNCTION CONSTRAINT
 %token<ival> CLUSTERED NONCLUSTERED TYPE VIEW SCHEMA TRIGGER
@@ -139,7 +139,7 @@ trg_def: mk_def TRIGGER obj_name ONX obj_name
 	      	   @1.last_column, @1.last_line,
 		   TRIGGER, $3.schema, $3.objname,
 		   @3.first_column, @3.first_line,
-	      	   @3.last_column, @3.last_line);
+	      	   @5.last_column, @5.last_line);
 	YYACCEPT;
 }
 ;
@@ -289,12 +289,20 @@ obj_name: NAME
 {
 	$$.schema = $1;
 	$$.objname = $3;
+	@$.first_column = @1.first_column;
+	@$.first_line = @1.first_line;
+	@$.last_column = @3.last_column;
+	@$.last_line = @3.last_line;
 }	
 	| NAME '.' NAME '.' NAME
 {
 	$$.dbname = $1;
 	$$.schema = $3;
 	$$.objname = $5;
+	@$.first_column = @1.first_column;
+	@$.first_line = @1.first_line;
+	@$.last_column = @5.last_column;
+	@$.last_line = @5.last_line;
 }
 ;
 

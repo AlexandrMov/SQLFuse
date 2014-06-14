@@ -403,7 +403,7 @@ static int sqlfs_write(const char *path, const char *buf, size_t size,
     if (len < size + offset)
       fsfile->buffer = g_realloc_n(fsfile->buffer, size + offset + 1,
 				   sizeof(gchar ));
-    g_strlcpy(fsfile->buffer + offset, buf, size);
+    g_strlcpy(fsfile->buffer + offset, buf, size + 1);
     err = size;
     fsfile->flush = TRUE;
   }
