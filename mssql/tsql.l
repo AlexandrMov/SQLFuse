@@ -23,7 +23,7 @@
 
 #include "tsql.tab.h"
 
-int yycolumn = 1;
+extern int yycolumn;
 
 #define YY_USER_ACTION yylloc.first_line = yylloc.last_line = yylineno; \
     yylloc.first_column = yycolumn; yylloc.last_column = yycolumn + yyleng - 1; \
@@ -32,7 +32,7 @@ int yycolumn = 1;
 void yyerror(char *s);
 %}
 
-%option yylineno
+%option yylineno noyywrap
 
 %%
 
@@ -82,7 +82,7 @@ REFERENCES	{ return REFERENCES; }
 
 [0-9]+ 		|
 [0-9]+"."[0-9]*	|
-"."[0-9]*		{ yylval.ival = atoi(yytext); return INTNUM; }
+"."[0-9]+		{ yylval.ival = atoi(yytext); return INTNUM; }
 
 [0-9]+[eE][+-]?[0-9]+	      	|
 [0-9]+"."[0-9]*[eE][+-]?[0-9]+ 	|
@@ -90,11 +90,11 @@ REFERENCES	{ return REFERENCES; }
 
 '[^'\n]*'	{ yylval.sval = strdup(yytext); return STRING; }
 [-+*/(),.;]	return yytext[0];
-"--".*$		{ yycolumn = 1; /* skip comment */ }
+"--".*$		{ /*yycolumn = 1;*/ /* skip comment */ }
 [A-Za-z][A-Za-z0-9_]*	{ yylval.sval = strdup(yytext); return NAME; }
 \/\*([^*]|\*[^/])*\*+\/ ; /* skip comment */
 '[^'\n]*$		{ yyerror("Unterminated string"); }
-\n		       	{ yycolumn = 1; }
+\n		       	{ /*yycolumn = 1;*/ }
 [ \t\r]+	       	; /* skip whitespaces */
 <<EOF>>			{ yycolumn = 1; yyterminate(); }
 %%
