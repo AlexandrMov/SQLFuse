@@ -1,0 +1,7 @@
+CREATE TRIGGER dbo.trg_test 
+	ON dbo.sFacul
+AFTER INSERT,UPDATE,DELETE
+AS
+BEGIN
+    PRINT 'hello'
+END

@@ -207,11 +207,12 @@ void remove_ms_object(const char *schema, const char *parent,
       break;
     case R_TR:
       g_string_append(sql, "TRIGGER");
+      break;
     default:
       g_set_error(&terr, EENOTSUP, EENOTSUP, NULL);
     }
     
-    g_string_append_printf(sql, " %s.%s", schema, obj->name);
+    g_string_append_printf(sql, " [%s].[%s]", schema, obj->name);
   }
   
   if (terr == NULL) {
