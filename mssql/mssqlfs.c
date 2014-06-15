@@ -112,6 +112,24 @@ struct sqlfs_ms_obj * find_ms_object(const struct sqlfs_ms_obj *parent,
   return result;
 }
 
+static gboolean str_need_escape(const char *text)
+{
+  gboolean need = FALSE;
+
+  int i = 0;
+  if (text[i] != '[')
+    while (text[i] != '\0') {
+      if (text[i] == ' ' || text[i] == '.') {
+	need = TRUE;
+	break;
+      }
+      
+      i++;
+    }
+  
+  return need;
+}
+
 void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 		     const char *text, struct sqlfs_ms_obj *obj, GError **err)
 {
@@ -165,7 +183,11 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       
       g_string_append_len(sql, text + node->module_node->last_columnm,
 			  node->first_column - node->module_node->last_columnm - 1);
-      g_string_append_printf(sql, "%s.%s", schema, obj->name);
+      
+      if (str_need_escape(obj->name))
+	g_string_append_printf(sql, "%s.[%s]", schema, obj->name);
+      else
+	g_string_append_printf(sql, "%s.%s", schema, obj->name);
       
       if (node->type == TRIGGER) {
 	g_string_append_printf(sql, " ON %s.%s", schema, parent->name);
@@ -173,6 +195,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       
       g_string_append(sql, text + node->last_column);
       wrktext = g_strdup(sql->str);
+      g_message("\n%s\n", wrktext);
       
       g_string_free(sql, TRUE);
     }
@@ -237,7 +260,10 @@ void remove_ms_object(const char *schema, const char *parent,
       g_set_error(&terr, EENOTSUP, EENOTSUP, NULL);
     }
     
-    g_string_append_printf(sql, " %s.%s", schema, obj->name);
+    if (str_need_escape(obj->name))
+      g_string_append_printf(sql, " %s.[%s]", schema, obj->name);    
+    else
+      g_string_append_printf(sql, " %s.%s", schema, obj->name);
   }
   
   if (terr == NULL) {

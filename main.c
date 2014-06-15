@@ -470,7 +470,7 @@ static int sqlfs_unlink(const char *path)
 
   gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
   if (schema == NULL)
-    err = -EFAULT;
+    err = -EFAULT; 
 
   if (!err) {
     GError *terr = NULL;
@@ -506,6 +506,15 @@ static int sqlfs_truncate(const char *path, off_t offset)
   return err;
 }
 
+static int sqlfs_rename(const char *name, const char *newname)
+{
+  int err = 0;
+
+  
+  
+  return err;
+}
+
 static void free_sqlfs_file(gpointer pointer)
 {
   sqlfs_file_t *fsfile = (sqlfs_file_t *) pointer;
@@ -524,6 +533,7 @@ static struct fuse_operations sqlfs_oper = {
   .open = sqlfs_open,
   .mknod = sqlfs_mknod,
   .write = sqlfs_write,
+  .rename = sqlfs_rename,
   .utime = sqlfs_utime,
   .chown = sqlfs_chown,
   .chmod = sqlfs_chmod,
