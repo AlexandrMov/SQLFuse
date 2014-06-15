@@ -234,7 +234,7 @@ GList * fetch_modules(int tid, const char *name, GError **error)
   g_string_append(sql, "SELECT so.name, so.object_id, so.type");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, so.create_date)");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, so.modify_date)");
-  g_string_append(sql, ", LEN(ISNULL(sm.definition, 0)) ");
+  g_string_append(sql, ", DATALENGTH(sm.definition) ");
   g_string_append(sql, " FROM sys.objects so INNER JOIN sys.sql_modules sm");
   g_string_append(sql, "   ON so.object_id = sm.object_id");
   g_string_append_printf(sql, " WHERE so.parent_object_id = %d", tid);
