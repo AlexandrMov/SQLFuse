@@ -268,7 +268,6 @@ void remove_ms_object(const char *schema, const char *parent,
       g_string_append_printf(sql, " %s.[%s]", schema, obj->name);    
     else
       g_string_append_printf(sql, " %s.%s", schema, obj->name);
-    
   }
   
   if (terr == NULL) {
