@@ -460,6 +460,7 @@ static int sqlfs_release(const char *path, struct fuse_file_info *fi)
     err = -ENOENT;
 
   g_hash_table_remove(cache.open_table, &(fi->fh));
+  SAFE_REMOVE_ALL(path);  
   
   return err;
 }
@@ -506,11 +507,42 @@ static int sqlfs_truncate(const char *path, off_t offset)
   return err;
 }
 
-static int sqlfs_rename(const char *name, const char *newname)
+static int sqlfs_rename(const char *oldname, const char *newname)
 {
   int err = 0;
 
-  
+  gchar **schemaold = g_strsplit(g_path_skip_root(oldname), G_DIR_SEPARATOR_S, -1);
+  if (schemaold == NULL)
+    err = -EFAULT;
+
+  gchar **schemanew = g_strsplit(g_path_skip_root(newname), G_DIR_SEPARATOR_S, -1);
+  if (schemanew == NULL)
+    err = -EFAULT;
+
+  if (!err) {
+    GError *terr = NULL;
+    gchar *ppold = g_path_get_dirname(oldname),
+      *ppnew = g_path_get_dirname(newname);
+    
+    struct sqlfs_ms_obj
+      *ppobj_old = find_object(ppold, &terr),
+      *obj_old = find_object(oldname, &terr),
+      *ppobj_new = find_object(ppnew, &terr),
+      *obj_new = g_try_new0(struct sqlfs_ms_obj, 1);
+
+    if (!obj_old)
+      obj_old->name = g_path_get_basename(oldname);
+
+    obj_new->name = g_path_get_basename(newname);
+
+    if (!g_strcmp0(ppold, ppnew))
+      rename_ms_object(*schemanew, ppobj_new, obj_old, obj_new, &terr);
+    else
+      err = -ENOTSUP;
+    
+    if (terr != NULL && err == 0)
+      g_hash_table_remove(cache.cache_table, oldname);
+  }
   
   return err;
 }
