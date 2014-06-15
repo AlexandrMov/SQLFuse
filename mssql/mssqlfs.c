@@ -112,6 +112,24 @@ struct sqlfs_ms_obj * find_ms_object(const struct sqlfs_ms_obj *parent,
   return result;
 }
 
+static gboolean str_need_escape(const char *text)
+{
+  gboolean need = FALSE;
+
+  int i = 0;
+  if (text[i] != '[')
+    while (text[i] != '\0') {
+      if (text[i] == ' ' || text[i] == '.') {
+	need = TRUE;
+	break;
+      }
+      
+      i++;
+    }
+  
+  return need;
+}
+
 void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 		     const char *text, struct sqlfs_ms_obj *obj, GError **err)
 {
@@ -165,15 +183,24 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       
       g_string_append_len(sql, text + node->module_node->last_columnm,
 			  node->first_column - node->module_node->last_columnm - 1);
-      g_string_append_printf(sql, "%s.%s", schema, obj->name);
-      
+
+      gboolean need = str_need_escape(obj->name);
+      if (need)
+	g_string_append_printf(sql, "%s.[%s]", schema, obj->name);
+      else
+	g_string_append_printf(sql, "%s.%s", schema, obj->name);
+
       if (node->type == TRIGGER) {
 	g_string_append_printf(sql, " ON %s.%s", schema, parent->name);
       }
+
+      int offset = node->last_column;
+      if (text[offset] == ']')
+	offset++;
       
-      g_string_append(sql, text + node->last_column);
+      g_string_append(sql, text + offset);
+
       wrktext = g_strdup(sql->str);
-      
       g_string_free(sql, TRUE);
     }
       break;
@@ -236,8 +263,12 @@ void remove_ms_object(const char *schema, const char *parent,
     default:
       g_set_error(&terr, EENOTSUP, EENOTSUP, NULL);
     }
+
+    if (str_need_escape(obj->name))
+      g_string_append_printf(sql, " %s.[%s]", schema, obj->name);    
+    else
+      g_string_append_printf(sql, " %s.%s", schema, obj->name);
     
-    g_string_append_printf(sql, " [%s].[%s]", schema, obj->name);
   }
   
   if (terr == NULL) {
@@ -259,7 +290,12 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
   char *def = NULL;
   
   GString *sql = g_string_new(NULL);
-  g_string_append_printf(sql, "EXEC sp_helptext '%s.%s'", parent, obj->name);
+
+  if (str_need_escape(obj->name))
+    g_string_append_printf(sql, "EXEC sp_helptext '%s.[%s]'", parent, obj->name);
+  else
+    g_string_append_printf(sql, "EXEC sp_helptext '%s.%s'", parent, obj->name);
+  
   msctx_t *ctx = exec_sql(sql->str, &terr);
 
   if (!terr) {
@@ -328,6 +364,31 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
     g_propagate_error(error, terr);
 
   return def;
+}
+
+void rename_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
+		      struct sqlfs_ms_obj *obj_old, struct sqlfs_ms_obj *obj_new,
+		      GError **error)
+{
+  GError *terr = NULL;
+  if (obj_old->type == R_COL) {
+    GString *sql = g_string_new(NULL);    
+    g_string_append_printf(sql, "EXEC sp_rename '%s.%s.%s', '%s'",
+			   schema, parent->name,
+			   obj_old->name, obj_new->name);
+    msctx_t *ctx = exec_sql(sql->str, &terr);
+    close_sql(ctx);
+    g_string_free(sql, TRUE);
+  }
+  else {
+    gchar *text = load_help_text(schema, obj_old, &terr);
+    remove_ms_object(schema, parent->name, obj_old, &terr);
+    write_ms_object(schema, parent, text, obj_new, &terr);
+    g_free(text);
+  }
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
 }
 
 GList * fetch_table_obj(int schema_id, int table_id, const char *name,

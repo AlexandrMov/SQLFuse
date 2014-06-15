@@ -213,6 +213,13 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 		     const char *text, struct sqlfs_ms_obj *obj, GError **error);
 
 /*
+ * Переименовать/переместить объект
+ */
+void rename_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
+		      struct sqlfs_ms_obj *obj_old, struct sqlfs_ms_obj *obj_new,
+		      GError **error);
+
+/*
  * Удалить объект
  */
 void remove_ms_object(const char *schema, const char *parent,
