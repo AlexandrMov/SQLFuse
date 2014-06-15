@@ -21,8 +21,8 @@ YACC		:= bison -dvl
 LEX		:= flex -L
 MODULES		:= .
 
-SRC_FILES	:= main.c
-OBJ_FILES	:= main.o
+SRC_FILES	:= main.c keyconf.c keyconf.h
+OBJ_FILES	:= main.o keyconf.o
 
 # MSSQL
 MSSQL_PREFIX	:= ./mssql/
@@ -35,7 +35,7 @@ OBJ_FILES	+= $(addprefix $(MSSQL_PREFIX), $(MSSQL_OBJS))
 MODULES		+= mssql
 
 
-CFLAGS 	+= -g -lsybdb $(shell pkg-config --cflags glib-2.0 fuse)
+CFLAGS 	+= -g -lsybdb $(shell pkg-config --cflags glib-2.0 fuse) -I`pwd`
 LDFLAGS += -g
 LIBS 	+= -lsybdb $(shell pkg-config --libs glib-2.0 fuse)
 
@@ -56,6 +56,9 @@ $(PROGRAM): $(OBJ_FILES)
 
 main.o: main.c
 	$(CC) $< -c $(CFLAGS) $(LDFLAGS) $(LIBS) -MD
+
+keyconf.o: keyconf.c
+	$(CC) $< -c $(shell pkg-config --cflags glib-2.0)
 
 # MSSQL
 mssql/tsql.%.o: tsql.%.c

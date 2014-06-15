@@ -17,6 +17,7 @@
   along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <keyconf.h>
 #include "mssqlfs.h"
 #include "util.h"
 #include "exec.h"
@@ -70,9 +71,9 @@ static int err_handler(DBPROCESS * dbproc, int severity, int dberr, int oserr,
 }
 
 
-void init_msctx(struct sqlctx *ctx, GError **error)
+void init_msctx(GError **error)
 {
-  init_context(ctx, err_handler, msg_handler, error);
+  init_context(err_handler, msg_handler, error);
   initobjtypes();
   init_checker();
 }
@@ -304,12 +305,18 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
     DBCHAR def_buf[256];
     dbbind(ctx->dbproc, 1, NTBSTRINGBIND, (DBINT) 0, (BYTE *) def_buf);
     int rowcode;
-    
+    sqlctx_t *sqlctx = fetch_context(FALSE, &terr);
+    gchar *convert = NULL;
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
-	g_string_append_printf(sql, g_convert(def_buf, strlen(def_buf), "UTF-8", "CP1251",
-					      NULL, NULL, &terr));
+	convert = g_convert(def_buf, strlen(def_buf),
+			    sqlctx->from_codeset, sqlctx->to_codeset,
+			    NULL, NULL, &terr);
+	g_string_append(sql, convert);
+	
+	if (convert != NULL)
+	  g_free(convert);
 	break;
       case BUF_FULL:
 	break;

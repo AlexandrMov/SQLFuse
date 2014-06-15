@@ -17,40 +17,38 @@
   along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "mssqlfs.h"
+#ifndef KEYFILE_H
+#define KEYFILE_H
+
+#include <glib.h>
 
 typedef struct {
-  LOGINREC *login;
-  DBPROCESS *dbproc;
+  char *appname;
+  char *servername, *dbname, *auth;
+  char *username, *password;
+  char *from_codeset, *to_codeset;
   
-  GMutex lock;
-  
-} msctx_t;
+  int maxconn, debug;
+} sqlctx_t;
 
 /*
- *
- * Инициализация контекста
- *
+ * Инициализировать конфигурационный файл
  */
-void init_context(gpointer err_handler, gpointer msg_handler, GError **error);
+void init_keyfile(const char *profile, GError **error);
 
 /*
- *
- * Выполнить SQL-запрос на основе контекста
- *
+ * Загрузить контекст
  */
-msctx_t * exec_sql(const char *sql, GError **err);
+sqlctx_t * fetch_context(int load_auth, GError **error);
 
 /*
- *
- * Закончить выполнение SQL-запроса
- *
+ * Очистить контекст
  */
-void close_sql(msctx_t *context);
+void clear_context();
 
 /*
- *
- * Закрытие контекста
- *
+ * Закрыть конфигурационный файл
  */
-void close_context(GError **error);
+void close_keyfile();
+
+#endif
