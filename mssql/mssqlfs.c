@@ -195,12 +195,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 	g_string_append_printf(sql, " ON %s.%s", schema, parent->name);
       }
 
-      int offset = node->last_column;
-      if (text[offset] == ']')
-	offset++;
-      
-      g_string_append(sql, text + offset);
-
+      g_string_append(sql, text + node->last_column);
       wrktext = g_strdup(sql->str);
       g_string_free(sql, TRUE);
     }

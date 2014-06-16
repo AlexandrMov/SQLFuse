@@ -65,6 +65,7 @@
 
 %type<nodeobj> index_def obj_name data_type clust_idx_def
 %type<ival> mk_def
+%type<sval> var_def
 
 %start input
 
@@ -90,7 +91,7 @@ input: column_def
 ;
 
 constraint_def: %empty
-	| CONSTRAINT NAME
+	| CONSTRAINT var_def
 ;
 
 primary_def: PRIMARY_KEY
@@ -101,8 +102,8 @@ primary_def: PRIMARY_KEY
 	YYACCEPT;
 }
 
-foreign_def: FOREIGN_KEY '(' NAME ')'
-	     REFERENCES obj_name '(' NAME ')'
+foreign_def: FOREIGN_KEY '(' var_def ')'
+	     REFERENCES obj_name '(' var_def ')'
 {
 	put_node(FOREIGN_KEY, NULL, $3,
 		 @3.first_column, @3.first_line,
@@ -155,7 +156,7 @@ view_def: mk_def VIEW obj_name
 }
 ;
 
-schema_def: mk_def SCHEMA NAME
+schema_def: mk_def SCHEMA var_def
 {
 	put_node(SCHEMA, NULL, $3,
 		 @3.first_column, @3.first_line,
@@ -183,7 +184,7 @@ index_def: UNIQUE clust_idx_def
 }
 ;
 
-clust_idx_def: INDEX NAME ONX obj_name
+clust_idx_def: INDEX var_def ONX obj_name
 {
 	$$ = $4;
 }
@@ -281,11 +282,11 @@ data_type: obj_name
 	| obj_name '(' INTNUM ',' INTNUM ')'
 ;
 
-obj_name: NAME
+obj_name: var_def
 {
 	$$.objname = $1;
 }
-	| NAME '.' NAME
+	| var_def '.' var_def
 {
 	$$.schema = $1;
 	$$.objname = $3;
@@ -294,7 +295,7 @@ obj_name: NAME
 	@$.last_column = @3.last_column;
 	@$.last_line = @3.last_line;
 }	
-	| NAME '.' NAME '.' NAME
+	| var_def '.' var_def '.' var_def
 {
 	$$.dbname = $1;
 	$$.schema = $3;
@@ -303,6 +304,17 @@ obj_name: NAME
 	@$.first_line = @1.first_line;
 	@$.last_column = @5.last_column;
 	@$.last_line = @5.last_line;
+}
+;
+
+var_def: NAME
+	| '[' NAME ']'
+{
+	$$ = $2;
+	@$.first_column = @1.first_column;
+	@$.first_line = @1.first_line;
+	@$.last_column = @3.first_column;
+	@$.last_line = @3.last_line;
 }
 ;
 
@@ -322,6 +334,7 @@ column_def_opt_list: %empty
 	| column_def_opt_list ROWGUIDCOL
 	| column_def_opt_list SPARSE
 ;
+
 identity_def: IDENTITY
 	| identity_def '(' INTNUM ',' INTNUM ')'
 	| identity_def NOT_FOR_REPLICATION

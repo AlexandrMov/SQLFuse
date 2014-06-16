@@ -1,1 +1,1 @@
-COLUMN test decimal(19,4)
+COLUMN test nvarchar(10)
