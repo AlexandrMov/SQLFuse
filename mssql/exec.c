@@ -18,7 +18,7 @@
 */
 
 #include "exec.h"
-#include <keyconf.h>
+#include <conf/keyconf.h>
 #include <string.h>
 
 

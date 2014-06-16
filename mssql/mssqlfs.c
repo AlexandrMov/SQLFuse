@@ -17,7 +17,7 @@
   along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include <keyconf.h>
+#include <conf/keyconf.h>
 #include "mssqlfs.h"
 #include "util.h"
 #include "exec.h"

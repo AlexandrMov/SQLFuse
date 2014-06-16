@@ -21,8 +21,16 @@ YACC		:= bison -dvl
 LEX		:= flex -L
 MODULES		:= .
 
-SRC_FILES	:= main.c keyconf.c keyconf.h
-OBJ_FILES	:= main.o keyconf.o
+SRC_FILES	:= main.c
+OBJ_FILES	:= main.o
+
+# KEYCONF
+KC_PREFIX	:= ./conf/
+KC_FILES	:= keyconf.c keyconf.h
+KC_OBJS		:= keyconf.o
+SRC_FILES	+= $(addprefix $(KC_PREFIX), $(KC_FILES))
+OBJ_FILES	+= $(addprefix $(KC_PREFIX), $(KC_OBJS))
+MODULES		+= conf
 
 # MSSQL
 MSSQL_PREFIX	:= ./mssql/
@@ -35,7 +43,7 @@ OBJ_FILES	+= $(addprefix $(MSSQL_PREFIX), $(MSSQL_OBJS))
 MODULES		+= mssql
 
 
-CFLAGS 	+= -g -lsybdb $(shell pkg-config --cflags glib-2.0 fuse) -I`pwd`
+CFLAGS 	+= -g -lsybdb $(shell pkg-config --cflags glib-2.0 fuse) -I.
 LDFLAGS += -g
 LIBS 	+= -lsybdb $(shell pkg-config --libs glib-2.0 fuse)
 
@@ -48,6 +56,7 @@ clean:
 	rm -f $(PROGRAM)
 	rm -f $(OBJ_FILES)
 	rm -f $(addprefix $(MSSQL_PREFIX), $(MSSQL_GEN_FILES) *~)
+	rm -f $(addprefix $(KC_PREFIX), $(KC_OBJS) *~)
 	rm -f *~
 	rm -f *.d *.output
 
@@ -56,9 +65,6 @@ $(PROGRAM): $(OBJ_FILES)
 
 main.o: main.c
 	$(CC) $< -c $(CFLAGS) $(LDFLAGS) $(LIBS) -MD
-
-keyconf.o: keyconf.c
-	$(CC) $< -c $(shell pkg-config --cflags glib-2.0)
 
 # MSSQL
 mssql/tsql.%.o: tsql.%.c

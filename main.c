@@ -18,7 +18,7 @@
 */
 
 #include "mssql/mssqlfs.h"
-#include "keyconf.h"
+#include <conf/keyconf.h>
 
 struct sqlcache {
   GMutex m;
