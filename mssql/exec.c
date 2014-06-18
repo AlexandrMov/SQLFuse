@@ -37,6 +37,7 @@ static inline char * get_npw_sql()
   g_string_append(sql, "SET ANSI_NULLS ON;\n");
   g_string_append(sql, "SET ANSI_PADDING ON;\n");
   g_string_append(sql, "SET ANSI_WARNINGS ON;\n");
+  g_string_append(sql, "SET QUOTED_IDENTIFIER ON;\n");
 
   result = g_strdup(sql->str);
 
