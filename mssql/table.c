@@ -67,7 +67,7 @@ char * create_constr_def(const char *schema, const char *table,
     g_string_append_printf(sql, " CHECK %s", def);
 
   if (obj->type == R_D) {
-    g_string_append_printf(sql, " DEFAULT ", def);
+    g_string_append_printf(sql, " DEFAULT %s", def);
   }
 
   result = g_strdup(sql->str);
