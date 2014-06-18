@@ -49,6 +49,8 @@ static void load_from_file(GKeyFile *keyfile, const char *group, GError **error)
   if (g_key_file_has_key(keyfile, group, "from_codeset", &terr))
     sqlctx->from_codeset = g_key_file_get_value(keyfile, group,
 						"from_codeset", &terr);
+  if (g_key_file_has_key(keyfile, group, "ansi_npw", &terr))
+    sqlctx->ansi_npw = g_key_file_get_boolean(keyfile, group, "ansi_npw", &terr);
 
   if (g_key_file_has_key(keyfile, group, "auth", &terr))
     sqlctx->auth = g_key_file_get_value(keyfile, group, "auth", &terr);
@@ -99,7 +101,7 @@ sqlctx_t * fetch_context(gboolean load_auth, GError **error)
   if (!sqlctx->appname)
     sqlctx->appname = g_strdup("sqlfuse");
 
-  if (!sqlctx->maxconn)
+  if (sqlctx->maxconn < 1)
     sqlctx->maxconn = 1;
   
   if (load_auth && sqlctx->auth) {

@@ -305,13 +305,16 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
-	convert = g_convert(def_buf, strlen(def_buf),
-			    sqlctx->from_codeset, sqlctx->to_codeset,
-			    NULL, NULL, &terr);
+	if (sqlctx->from_codeset != NULL && sqlctx->to_codeset != NULL)
+	  convert = g_convert(def_buf, strlen(def_buf),
+			      sqlctx->from_codeset, sqlctx->to_codeset,
+			      NULL, NULL, &terr);
+	else
+	  convert = g_strdup(def_buf);
+	
 	g_string_append(sql, convert);
 	
-	if (convert != NULL)
-	  g_free(convert);
+	g_free(convert);
 	break;
       case BUF_FULL:
 	break;
