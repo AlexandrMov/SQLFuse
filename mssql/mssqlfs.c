@@ -314,6 +314,8 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
 	  g_free(convert);
 	break;
       case BUF_FULL:
+	g_set_error(&terr, EEFULL, EEFULL,
+		    "%d: dbresults failed\n", __LINE__);
 	break;
       case FAIL:
 	g_set_error(&terr, EERES, EERES,
@@ -474,6 +476,8 @@ GList * fetch_schema_obj(int schema_id, const char *name,
 	lst = g_list_append(lst, obj);
 	break;
       case BUF_FULL:
+	g_set_error(&terr, EEFULL, EEFULL,
+		    "%d: dbresults failed\n", __LINE__);
 	break;
       case FAIL:
 	g_set_error(&terr, EERES, EERES,
@@ -513,7 +517,7 @@ GList * fetch_schemas(const char *name, GError **error)
 	   (BYTE *) schname_buf);
 
     struct sqlfs_ms_obj *obj = NULL;
-    while ((rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
+    while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
 	obj = g_try_new0(struct sqlfs_ms_obj, 1);
@@ -523,6 +527,8 @@ GList * fetch_schemas(const char *name, GError **error)
 	lst = g_list_append(lst, obj);
 	break;
       case BUF_FULL:
+	g_set_error(&terr, EEFULL, EEFULL,
+		    "%d: dbresults failed\n", __LINE__);
 	break;
       case FAIL:
 	g_set_error(&terr, EERES, EERES,

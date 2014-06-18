@@ -72,6 +72,7 @@
 #define EECMD 0x121
 #define EEXEC 0x122
 #define EERES 0x123
+#define EEFULL 0x124
 #define EENOTFOUND 0x221
 #define EEPARSE 0x222
 
