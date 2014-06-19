@@ -29,11 +29,34 @@ typedef struct {
 
 exectx_t *ectx;
 
+static inline char * get_npw_sql()
+{
+  char *result = NULL;
+  GString *sql = g_string_new(NULL);
+  
+  g_string_append(sql, "SET ANSI_NULLS ON;\n");
+  g_string_append(sql, "SET ANSI_PADDING ON;\n");
+  g_string_append(sql, "SET ANSI_WARNINGS ON;\n");
+
+  result = g_strdup(sql->str);
+
+  g_string_free(sql, TRUE);
+
+  return result;
+}
+
 static gboolean do_exec_sql(const char *sql, const msctx_t *ctx, GError **err)
 {
-  gchar *sqlconv = g_convert(sql, strlen(sql),
-			     ectx->to_codeset, ectx->from_codeset,
-			     NULL, NULL, err);
+  gchar *sqlconv = NULL;
+  if (ectx->to_codeset != NULL && ectx->from_codeset != NULL) {
+    sqlconv = g_convert(sql, strlen(sql),
+			ectx->to_codeset, ectx->from_codeset,
+			NULL, NULL, err);
+  }
+  else {
+    sqlconv = g_strdup(sql);
+  }
+  
   if ((dbcmd(ctx->dbproc, sqlconv) == FAIL)) {
     g_set_error(err, EECMD, EECMD,
 		"%d: dbcmd() failed\n", __LINE__);
@@ -52,8 +75,7 @@ static gboolean do_exec_sql(const char *sql, const msctx_t *ctx, GError **err)
     return FALSE;
   }
 
-  if (sqlconv != NULL)
-    g_free(sqlconv);
+  g_free(sqlconv);
 
   return TRUE;
 }
@@ -83,11 +105,13 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
   }
   
   if (terr == NULL) {
-    ectx->to_codeset = g_strdup(sqlctx->to_codeset);
-    ectx->from_codeset = g_strdup(sqlctx->from_codeset);
+    if (sqlctx->to_codeset != NULL && sqlctx->from_codeset != NULL) {
+      ectx->to_codeset = g_strdup(sqlctx->to_codeset);
+      ectx->from_codeset = g_strdup(sqlctx->from_codeset);
+    }
     
     int i;
-    msctx_t *msctx = NULL;
+    msctx_t *msctx = NULL;    
     for (i = 0; i < sqlctx->maxconn; i++) {
       msctx = g_try_new0(msctx_t, 1);
     
@@ -116,6 +140,9 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
 	}
       }
 
+      if (terr == NULL && sqlctx->ansi_npw == TRUE)
+	do_exec_sql(get_npw_sql(), msctx, &terr);
+
       if (terr == NULL) {
 	g_mutex_init(&msctx->lock);
 	ectx->ctxlist = g_slist_append(ectx->ctxlist, msctx);
@@ -127,7 +154,7 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
   }
   
   if (terr != NULL)
-	g_propagate_error(error, terr);
+    g_propagate_error(error, terr);
 }
 
 msctx_t * exec_sql(const char *sql, GError **error)
@@ -164,6 +191,13 @@ msctx_t * exec_sql(const char *sql, GError **error)
 		      "%s:%d: unable to use to database %s\n",
 		      sqlctx->appname, __LINE__,
 		      sqlctx->dbname);
+	}
+
+	if (sqlctx->ansi_npw == TRUE && terr == NULL
+	    && do_exec_sql(get_npw_sql(), wrkctx, &terr)) {
+	  g_set_error(&terr, EEXEC, EEXEC,
+		      "%s:%d: unable sets init params NPW\n",
+		      sqlctx->appname, __LINE__);
 	}
 
 	clear_context();

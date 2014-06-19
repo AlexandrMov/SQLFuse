@@ -4,6 +4,35 @@
 CREATE PROCEDURE [dbo].spLibTest
 AS
 BEGIN
+    CREATE TABLE #T1 (a int, b int NULL, c varchar(20))
+    
     SELECT 'Привет всем, это русский текст!'
-    SELECT 'hello'
+    
+    INSERT INTO T1 
+    VALUES (1, NULL, '')
+	  ,(1, 0, '')
+          ,(2, 1, '')
+	  ,(2, 2, '')
+    
+    INSERT INTO #T1
+    VALUES (3, 3, 'Text string longer than 20 characters');
+    
+    SELECT a, SUM(b) 
+    FROM #T1 
+    GROUP BY a
+    
+    SELECT a / b AS ab 
+    FROM #T1
+    
+    DECLARE @varname int;
+    SET @varname = NULL;
+    SELECT a 
+    FROM t1 
+    WHERE a = @varname;
+
+    SELECT a 
+    FROM t1 
+    WHERE a <> @varname;
+    
+    DROP TABLE #T1
 END
