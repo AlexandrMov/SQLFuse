@@ -123,7 +123,9 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
       }
 
       if (terr == NULL) {
-	DBSETLCHARSET(msctx->login, ectx->to_codeset);
+	if (ectx->to_codeset != NULL)
+	  DBSETLCHARSET(msctx->login, ectx->to_codeset);
+	
 	DBSETLUSER(msctx->login, sqlctx->username);
 	DBSETLPWD(msctx->login, sqlctx->password);
 	DBSETLAPP(msctx->login, sqlctx->appname);
