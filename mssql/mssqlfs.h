@@ -110,6 +110,7 @@ struct sqlfs_ms_constraint {
     char *column_name;
     int disabled;
   };
+  int not4repl;
   
   char *def;
 };

@@ -63,15 +63,19 @@ char * create_constr_def(const char *schema, const char *table,
 
   g_string_append_printf(sql, " ADD CONSTRAINT [%s] ", obj->name);
 
-  if (obj->type == R_C)
-    g_string_append_printf(sql, " CHECK %s", def);
+  if (obj->type == R_C) {
+    g_string_append_printf(sql, "CHECK", def);
+    if (obj->clmn_ctrt->not4repl)
+      g_string_append(sql, " NOT FOR REPLICATION");
+
+    g_string_append_printf(sql, " %s", def);
+  }
 
   if (obj->type == R_D) {
     g_string_append_printf(sql, " DEFAULT %s", def);
   }
 
   result = g_strdup(sql->str);
-  g_message("constr: %s\n", result);
   g_string_free(sql, TRUE);
   
   return result;
@@ -202,6 +206,8 @@ GList * fetch_columns(int tid, const char *name, GError **error)
 	reslist = g_list_append(reslist, obj);
 	break;
       case BUF_FULL:
+	g_set_error(&terr, EEFULL, EEFULL,
+		    "%d: dbresults failed\n", __LINE__);
 	break;
       case FAIL:
 	g_set_error(&terr, EERES, EERES,
@@ -278,6 +284,8 @@ GList * fetch_modules(int tid, const char *name, GError **error)
 	list = g_list_append(list, trgobj);
 	break;
       case BUF_FULL:
+	g_set_error(&terr, EEFULL, EEFULL,
+		    "%d: dbresults failed\n", __LINE__);
 	break;
       case FAIL:
 	g_set_error(&terr, EERES, EERES,
@@ -317,11 +325,16 @@ char * make_constraint_def(const struct sqlfs_ms_obj *ctrt, const char *def)
       else
 	g_string_append(sql, "WITH CHECK ");
       
-      g_string_append_printf(sql, "CONSTRAINT %s CHECK (%s)",
-			     ctrt->name, def);
+      g_string_append_printf(sql, "CONSTRAINT %s CHECK ",
+			     ctrt->name);
+      
+      if (ctrt->clmn_ctrt->not4repl == TRUE)
+	g_string_append_printf(sql, "NOT FOR REPLICATION ", def);
+
+      g_string_append_printf(sql, "(%s)", def);
     }
 
-  text = g_strconcat(sql->str, "\n", NULL);
+  text = g_strdup(sql->str);
   g_string_free(sql, TRUE);
   
   return text;
@@ -335,7 +348,7 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
   GString *sql = g_string_new(NULL);
 
   g_string_append(sql, "SELECT dc.object_id, dc.name, sc.name");
-  g_string_append(sql, ", dc.definition, dc.type, 0");
+  g_string_append(sql, ", dc.definition, dc.type, 0, 0");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, dc.create_date)");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, dc.modify_date)");
   g_string_append(sql, " FROM sys.columns sc");
@@ -349,7 +362,8 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
 
   g_string_append(sql, " UNION ALL ");
   g_string_append(sql, "SELECT cc.object_id, cc.name, ''");
-  g_string_append(sql, ", cc.definition, cc.type, cc.is_disabled");
+  g_string_append(sql, ", cc.definition, cc.type");
+  g_string_append(sql, ", cc.is_disabled, cc.is_not_for_replication");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, cc.create_date)");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, cc.modify_date)");
   g_string_append(sql, " FROM sys.check_constraints cc ");
@@ -362,7 +376,7 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
   if (terr == NULL) {
     DBINT obj_id;
     DBCHAR type_buf[2];
-    DBINT cdate_buf, mdate_buf, disabled;
+    DBINT cdate_buf, mdate_buf, disabled, not4repl;
     char *csnt_name = g_malloc0_n(dbcollen(ctx->dbproc, 2) + 1, sizeof(char ));
     char *clmn_name = g_malloc0_n(dbcollen(ctx->dbproc, 3) + 1, sizeof(char ));
     char *def_text  = g_malloc0_n(dbcollen(ctx->dbproc, 4) + 1, sizeof(char ));
@@ -375,9 +389,11 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
     dbbind(ctx->dbproc, 4, STRINGBIND,
 	   dbcollen(ctx->dbproc, 4), (BYTE *) def_text);
     dbbind(ctx->dbproc, 5, STRINGBIND, (DBINT) 0, (BYTE *) type_buf);
-    dbbind(ctx->dbproc, 6, INTBIND, (DBINT) 0, (BYTE *) &cdate_buf);
-    dbbind(ctx->dbproc, 7, INTBIND, (DBINT) 0, (BYTE *) &mdate_buf);
-    dbbind(ctx->dbproc, 8, INTBIND, (DBINT) 0, (BYTE *) &disabled);
+    dbbind(ctx->dbproc, 6, INTBIND, (DBINT) 0, (BYTE *) &disabled);
+    dbbind(ctx->dbproc, 7, INTBIND, (DBINT) 0, (BYTE *) &not4repl);
+    dbbind(ctx->dbproc, 8, INTBIND, (DBINT) 0, (BYTE *) &cdate_buf);
+    dbbind(ctx->dbproc, 9, INTBIND, (DBINT) 0, (BYTE *) &mdate_buf);
+
 
     int rowcode;
     struct sqlfs_ms_obj *obj = NULL;
@@ -397,8 +413,10 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
 
 	if (obj->type == R_D)
 	  obj->clmn_ctrt->column_name = g_strdup(trimwhitespace(clmn_name));
-	else
+	else {
 	  obj->clmn_ctrt->disabled = disabled;
+	  obj->clmn_ctrt->not4repl = not4repl;
+	}
 	
 	obj->clmn_ctrt->def = make_constraint_def(obj, trimwhitespace(def_text));
 	obj->len = strlen(obj->clmn_ctrt->def);
@@ -407,6 +425,8 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
 	reslist = g_list_append(reslist, obj);
 	break;
       case BUF_FULL:
+	g_set_error(&terr, EEFULL, EEFULL,
+		    "%d: dbresults failed\n", __LINE__);
 	break;
       case FAIL:
 	g_set_error(&terr, EERES, EERES,
@@ -564,6 +584,8 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 	reslist = g_list_append(reslist, obj);
 	break;
       case BUF_FULL:
+	g_set_error(&terr, EEFULL, EEFULL,
+		    "%d: dbresults failed\n", __LINE__);
 	break;
       case FAIL:
 	g_set_error(&terr, EERES, EERES,

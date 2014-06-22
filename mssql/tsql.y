@@ -51,14 +51,13 @@
 %token<sval> NAME STRING
 %token<ival> INTNUM
 
-%left COMPARISON
 %left '+' '-'
 %left '*' '/'
 
 %token<ival> CREATE ALTER INDEX UNIQUE FUNCTION CONSTRAINT
 %token<ival> CLUSTERED NONCLUSTERED TYPE VIEW SCHEMA TRIGGER
 %token<ival> FILESTREAM COLLATE NULLX ROWGUIDCOL SPARSE
-%token<ival> IDENTITY DOCUMENT CONTENT MAX FOR WITH_CHECK
+%token<ival> IDENTITY MAX FOR WITH_CHECK
 %token<ival> ONX NOT_FOR_REPLICATION COLUMN NOT WITH_NOCHECK
 %token<ival> PROCEDURE PROC DEFAULT CHECK WITH APPROXNUM
 %token<ival> FOREIGN_KEY REFERENCES PRIMARY_KEY
@@ -85,7 +84,7 @@ input: column_def
 	| schema_def
 	| type_def
 	| constraint_def default_def
-	| check_def
+	| with_check_def
 	| constraint_def foreign_def
 	| constraint_def primary_def
 ;
@@ -198,31 +197,26 @@ mk_def: CREATE
 	| ALTER
 ;
 
-check_def: constraint_def CHECK comparison_expr
+check_def: constraint_def CHECK
 {
-	put_check(WITH_CHECK, 0, @3.first_column, @3.first_line,
-	      	  @3.last_column, @3.last_line);
+	@$ = @2;
+}
+;
+
+with_check_def: check_def
+	| WITH_CHECK check_def
+{
+	put_check(WITH_CHECK, @2.first_column, @2.first_line,
+	      	  @2.last_column, @2.last_line);
 	YYACCEPT;
 }
-	| constraint_def CHECK NOT_FOR_REPLICATION comparison_expr
+	| WITH_NOCHECK check_def
 {
-	put_check(WITH_CHECK, NOT_FOR_REPLICATION,
-	   	  @4.first_column, @4.first_line,
-	      	  @4.last_column, @4.last_line);
-  	YYACCEPT;
-}
-	| WITH_CHECK constraint_def CHECK comparison_expr
-{
-	put_check(WITH_CHECK, 0, @4.first_column, @4.first_line,
-	      	  @4.last_column, @4.last_line);
+	put_check(WITH_NOCHECK, @2.first_column, @2.first_line,
+	      	  @2.last_column, @2.last_line);
 	YYACCEPT;
 }
-	| WITH_NOCHECK constraint_def CHECK comparison_expr
-{
-	put_check(WITH_NOCHECK, 0, @4.first_column, @4.first_line,
-	      	  @4.last_column, @4.last_line);
-	YYACCEPT;
-}
+
 ;
 
 
@@ -233,10 +227,6 @@ default_def: DEFAULT const_expr FOR obj_name
 		    @2.last_column, @2.last_line);
 	YYACCEPT;
 }
-
-comparison_expr: const_expr COMPARISON const_expr
-		 | '(' comparison_expr ')'
-;
 
 const_expr: scalar_exp
 	    | '(' const_expr ')'

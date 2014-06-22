@@ -37,8 +37,6 @@ void yyerror(char *s);
 %%
 
 COLUMN		{ return COLUMN; }
-CONTENT		{ return CONTENT; }
-DOCUMENT	{ return DOCUMENT; }
 FILESTREAM	{ return FILESTREAM; }
 COLLATE		{ return COLLATE; }
 NOT		{ return NOT; }
@@ -71,14 +69,6 @@ CHECK		{ return CHECK; }
 WITH		{ return WITH; }
 CONSTRAINT	{ return CONSTRAINT; }
 REFERENCES	{ return REFERENCES; }
-
-"="		|
-"<>"		|
-"<"		|
-">"		|
-"<="		|
-">="		|
-"!="		{ yylval.sval = strdup(yytext); return COMPARISON; }
 
 [0-9]+ 		|
 [0-9]+"."[0-9]*	|

@@ -481,6 +481,10 @@ static int sqlfs_unlink(const char *path)
     }
 
     remove_ms_object(*schema, *(schema + 1), object, &terr);
+    
+    if (terr != NULL)
+      err = -EFAULT;
+
     SAFE_REMOVE_ALL(path);
   }
 

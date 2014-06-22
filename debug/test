@@ -1,1 +1,1 @@
-COLUMN test nvarchar(10)
+COLUMN test datetime
