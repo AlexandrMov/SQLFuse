@@ -17,6 +17,7 @@
   along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <conf/keyconf.h>
 #include "mssqlfs.h"
 #include "util.h"
 #include "exec.h"
@@ -70,9 +71,9 @@ static int err_handler(DBPROCESS * dbproc, int severity, int dberr, int oserr,
 }
 
 
-void init_msctx(struct sqlctx *ctx, GError **error)
+void init_msctx(GError **error)
 {
-  init_context(ctx, err_handler, msg_handler, error);
+  init_context(err_handler, msg_handler, error);
   initobjtypes();
   init_checker();
 }
@@ -112,24 +113,6 @@ struct sqlfs_ms_obj * find_ms_object(const struct sqlfs_ms_obj *parent,
   return result;
 }
 
-static gboolean str_need_escape(const char *text)
-{
-  gboolean need = FALSE;
-
-  int i = 0;
-  if (text[i] != '[')
-    while (text[i] != '\0') {
-      if (text[i] == ' ' || text[i] == '.') {
-	need = TRUE;
-	break;
-      }
-      
-      i++;
-    }
-  
-  return need;
-}
-
 void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 		     const char *text, struct sqlfs_ms_obj *obj, GError **err)
 {
@@ -163,7 +146,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 	  obj->clmn_ctrt->disabled = 1;
       }
       wrktext = create_constr_def(schema, parent->name, obj,
-				  text + node->first_column - 1);
+				  text + node->last_column);
       break;
     case DEFAULT:
       obj->type = R_D;
@@ -184,22 +167,13 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       g_string_append_len(sql, text + node->module_node->last_columnm,
 			  node->first_column - node->module_node->last_columnm - 1);
 
-      gboolean need = str_need_escape(obj->name);
-      if (need)
-	g_string_append_printf(sql, "%s.[%s]", schema, obj->name);
-      else
-	g_string_append_printf(sql, "%s.%s", schema, obj->name);
-
+      g_string_append_printf(sql, "[%s].[%s]", schema, obj->name);
+      
       if (node->type == TRIGGER) {
-	g_string_append_printf(sql, " ON %s.%s", schema, parent->name);
+	g_string_append_printf(sql, " ON [%s].[%s]", schema, parent->name);
       }
 
-      int offset = node->last_column;
-      if (text[offset] == ']')
-	offset++;
-      
-      g_string_append(sql, text + offset);
-
+      g_string_append(sql, text + node->last_column);
       wrktext = g_strdup(sql->str);
       g_string_free(sql, TRUE);
     }
@@ -264,10 +238,7 @@ void remove_ms_object(const char *schema, const char *parent,
       g_set_error(&terr, EENOTSUP, EENOTSUP, NULL);
     }
 
-    if (str_need_escape(obj->name))
-      g_string_append_printf(sql, " %s.[%s]", schema, obj->name);    
-    else
-      g_string_append_printf(sql, " %s.%s", schema, obj->name);
+    g_string_append_printf(sql, " [%s].[%s]", schema, obj->name);
   }
   
   if (terr == NULL) {
@@ -287,16 +258,10 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
 {
   GError *terr = NULL;
   char *def = NULL;
-  
   GString *sql = g_string_new(NULL);
-
-  if (str_need_escape(obj->name))
-    g_string_append_printf(sql, "EXEC sp_helptext '%s.[%s]'", parent, obj->name);
-  else
-    g_string_append_printf(sql, "EXEC sp_helptext '%s.%s'", parent, obj->name);
   
+  g_string_append_printf(sql, "EXEC sp_helptext '[%s].[%s]'", parent, obj->name);
   msctx_t *ctx = exec_sql(sql->str, &terr);
-
   if (!terr) {
     g_string_truncate(sql, 0);
     
@@ -304,14 +269,25 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
     DBCHAR def_buf[256];
     dbbind(ctx->dbproc, 1, NTBSTRINGBIND, (DBINT) 0, (BYTE *) def_buf);
     int rowcode;
-    
+    sqlctx_t *sqlctx = fetch_context(FALSE, &terr);
+    gchar *convert = NULL;
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
-	g_string_append_printf(sql, g_convert(def_buf, strlen(def_buf), "UTF-8", "CP1251",
-					      NULL, NULL, &terr));
+	if (sqlctx->from_codeset != NULL && sqlctx->to_codeset != NULL)
+	  convert = g_convert(def_buf, strlen(def_buf),
+			      sqlctx->from_codeset, sqlctx->to_codeset,
+			      NULL, NULL, &terr);
+	else
+	  convert = g_strdup(def_buf);
+	
+	g_string_append(sql, convert);
+	
+	g_free(convert);
 	break;
       case BUF_FULL:
+	g_set_error(&terr, EEFULL, EEFULL,
+		    "%d: dbresults failed\n", __LINE__);
 	break;
       case FAIL:
 	g_set_error(&terr, EERES, EERES,
@@ -472,6 +448,8 @@ GList * fetch_schema_obj(int schema_id, const char *name,
 	lst = g_list_append(lst, obj);
 	break;
       case BUF_FULL:
+	g_set_error(&terr, EEFULL, EEFULL,
+		    "%d: dbresults failed\n", __LINE__);
 	break;
       case FAIL:
 	g_set_error(&terr, EERES, EERES,
@@ -511,7 +489,7 @@ GList * fetch_schemas(const char *name, GError **error)
 	   (BYTE *) schname_buf);
 
     struct sqlfs_ms_obj *obj = NULL;
-    while ((rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
+    while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
 	obj = g_try_new0(struct sqlfs_ms_obj, 1);
@@ -521,6 +499,8 @@ GList * fetch_schemas(const char *name, GError **error)
 	lst = g_list_append(lst, obj);
 	break;
       case BUF_FULL:
+	g_set_error(&terr, EEFULL, EEFULL,
+		    "%d: dbresults failed\n", __LINE__);
 	break;
       case FAIL:
 	g_set_error(&terr, EERES, EERES,

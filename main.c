@@ -18,10 +18,15 @@
 */
 
 #include "mssql/mssqlfs.h"
+#include <conf/keyconf.h>
 
 struct sqlcache {
   GMutex m;
   GHashTable *cache_table, *temp_table, *open_table;
+};
+
+struct sqlprofile {
+  char *profile;
 };
 
 typedef struct {
@@ -35,10 +40,9 @@ typedef struct {
 #include <fcntl.h>
 #include <string.h>
 
-struct sqlctx *msctx;
 static struct sqlcache cache;
 
-#define SQLFS_OPT(t, p, v) { t, offsetof(struct sqlctx, p), v }
+#define SQLFS_OPT(t, p, v) { t, offsetof(struct sqlprofile, p), v }
 
 #define SAFE_REMOVE_ALL(p) g_mutex_lock(&cache.m); \
   g_hash_table_remove(cache.cache_table, p);	   \
@@ -46,11 +50,7 @@ static struct sqlcache cache;
   g_mutex_unlock(&cache.m);
 
 static struct fuse_opt sqlfs_opts[] = {
-  SQLFS_OPT("servername=%s", servername, 0),
-  SQLFS_OPT("username=%s", username, 0),
-  SQLFS_OPT("password=%s", password, 0),
-  SQLFS_OPT("dbname=%s", dbname, 0),
-  SQLFS_OPT("maxconn=%d", maxconn, 1),
+  SQLFS_OPT("profilename=%s", profile, 0),
 
   FUSE_OPT_END
 };
@@ -481,6 +481,10 @@ static int sqlfs_unlink(const char *path)
     }
 
     remove_ms_object(*schema, *(schema + 1), object, &terr);
+    
+    if (terr != NULL)
+      err = -EFAULT;
+
     SAFE_REMOVE_ALL(path);
   }
 
@@ -588,7 +592,7 @@ int main (int argc, char **argv)
 {
   int res;
   struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
-  msctx = g_try_new0(struct sqlctx, 1);
+  struct sqlprofile *profile = g_try_new0(struct sqlprofile, 1);
   g_mutex_init(&cache.m);
   cache.cache_table = g_hash_table_new_full(g_str_hash, g_str_equal,
 				      g_free, free_ms_obj);
@@ -596,25 +600,31 @@ int main (int argc, char **argv)
 				      g_free, free_ms_obj);
   cache.open_table = g_hash_table_new_full(g_int64_hash, g_int64_equal,
 					   g_free, free_sqlfs_file);
-  msctx->appname = g_strdup("sqlfs");
 
-  if (fuse_opt_parse(&args, msctx, sqlfs_opts, sqlfs_opt_proc) == -1)
+  if (fuse_opt_parse(&args, profile, sqlfs_opts, sqlfs_opt_proc) == -1)
     exit(1);
     
   GError *terr = NULL;
-  init_msctx(msctx, &terr);
+
+  init_keyfile(profile->profile, &terr);
+  if (terr != NULL)
+    exit(1);
+  
+  init_msctx(&terr);
   if (terr != NULL) {
     exit(1);
   }
   
-  g_free(msctx->appname);
-  g_free(msctx);
+  g_free(profile->profile);
+  g_free(profile);
   
   res = sqlfs_fuse_main(&args);
   fuse_opt_free_args(&args);
 
   close_msctx(&terr);
   g_mutex_clear(&cache.m);
+
+  close_keyfile();
   
   if (terr != NULL) {
     exit(2);

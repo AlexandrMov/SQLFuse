@@ -32,13 +32,11 @@ extern int yycolumn;
 void yyerror(char *s);
 %}
 
-%option yylineno noyywrap
+%option yylineno noyywrap case-insensitive
 
 %%
 
 COLUMN		{ return COLUMN; }
-CONTENT		{ return CONTENT; }
-DOCUMENT	{ return DOCUMENT; }
 FILESTREAM	{ return FILESTREAM; }
 COLLATE		{ return COLLATE; }
 NOT		{ return NOT; }
@@ -72,14 +70,6 @@ WITH		{ return WITH; }
 CONSTRAINT	{ return CONSTRAINT; }
 REFERENCES	{ return REFERENCES; }
 
-"="		|
-"<>"		|
-"<"		|
-">"		|
-"<="		|
-">="		|
-"!="		{ yylval.sval = strdup(yytext); return COMPARISON; }
-
 [0-9]+ 		|
 [0-9]+"."[0-9]*	|
 "."[0-9]+		{ yylval.ival = atoi(yytext); return INTNUM; }
@@ -89,12 +79,13 @@ REFERENCES	{ return REFERENCES; }
 "."[0-9]*[eE][+-]?[0-9]+		{ return APPROXNUM; }
 
 '[^'\n]*'	{ yylval.sval = strdup(yytext); return STRING; }
-[-+*/(),.;]	return yytext[0];
-"--".*$		{ /*yycolumn = 1;*/ /* skip comment */ }
-[A-Za-z][A-Za-z0-9_]*	{ yylval.sval = strdup(yytext); return NAME; }
+\[|\]|[-+*/(),.;]	return yytext[0];
+"--".*$		{ /* skip comment */ }
+[A-Za-z][A-Za-z0-9_]*  	|
+\[[A-Za-z][^\n'"@]*\]		{ yylval.sval = strdup(yytext); return NAME; }
 \/\*([^*]|\*[^/])*\*+\/ ; /* skip comment */
 '[^'\n]*$		{ yyerror("Unterminated string"); }
-\n		       	{ /*yycolumn = 1;*/ }
+\n		       	{ /* skip newline */ }
 [ \t\r]+	       	; /* skip whitespaces */
 <<EOF>>			{ yycolumn = 1; yyterminate(); }
 %%

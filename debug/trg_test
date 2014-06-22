@@ -1,4 +1,4 @@
-CREATE TRIGGER dbo.trg_test 
+CREATE TRIGGER [dbo].[trg_test]
 	ON dbo.sFacul
 AFTER INSERT,UPDATE,DELETE
 AS

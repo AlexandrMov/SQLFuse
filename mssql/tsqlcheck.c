@@ -100,12 +100,11 @@ void put_default(char *schema, char *objname, TOKEN_POS())
 }
 
 
-void put_check(unsigned int check, unsigned int not4repl, TOKEN_POS())
+void put_check(unsigned int check, TOKEN_POS())
 {
   put_node(CHECK, NULL, NULL, TOKEN_POS_A());
   checker->node->check_node = g_try_new0(check_node_t, 1);
   checker->node->check_node->check = check;
-  checker->node->check_node->not4repl = not4repl;
 }
 
 

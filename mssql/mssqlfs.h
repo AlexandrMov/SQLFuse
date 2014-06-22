@@ -72,18 +72,9 @@
 #define EECMD 0x121
 #define EEXEC 0x122
 #define EERES 0x123
+#define EEFULL 0x124
 #define EENOTFOUND 0x221
 #define EEPARSE 0x222
-
-struct sqlctx {
-  char *appname;
-  char *servername;
-  char *dbname;
-  char *username;
-  char *password;
-  int maxconn;
-  int debug;
-};
 
 struct sqlfs_ms_type {
   int sys_type_id;
@@ -119,6 +110,7 @@ struct sqlfs_ms_constraint {
     char *column_name;
     int disabled;
   };
+  int not4repl;
   
   char *def;
 };
@@ -174,7 +166,7 @@ struct sqlfs_ms_obj {
 /*
  * Инициализировать контекст
  */
-void init_msctx(struct sqlctx *ctx, GError **error);
+void init_msctx(GError **error);
 
 /*
  * Найти объект
