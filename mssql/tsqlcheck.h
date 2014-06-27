@@ -34,6 +34,7 @@ typedef struct module_mode {
 
 typedef struct check_node {
   unsigned int check;
+  unsigned int check_type;
   
 } check_node_t;
 
@@ -90,7 +91,7 @@ void put_module(unsigned int make_type, TOKEN_POS(m),
 void put_default(char *schema, char *objname, TOKEN_POS());
 
 
-void put_check(unsigned int check, TOKEN_POS());
+void put_check(unsigned int check, unsigned int check_type, TOKEN_POS());
 
 /*
  *

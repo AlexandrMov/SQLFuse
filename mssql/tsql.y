@@ -63,7 +63,7 @@
 %token<ival> FOREIGN_KEY REFERENCES PRIMARY_KEY
 
 %type<nodeobj> index_def obj_name data_type clust_idx_def
-%type<ival> mk_def
+%type<ival> mk_def check_def
 %type<sval> var_def
 
 %start input
@@ -85,7 +85,6 @@ input: column_def
 	| type_def
 	| constraint_def default_def
 	| with_check_def
-	| constraint_def foreign_def
 	| constraint_def primary_def
 ;
 
@@ -93,7 +92,7 @@ constraint_def: %empty
 	| CONSTRAINT var_def
 ;
 
-primary_def: PRIMARY_KEY
+primary_def: PRIMARY_KEY 
 {
 	put_node(PRIMARY_KEY, NULL, NULL,
 		 @1.first_column, @1.first_line,
@@ -101,6 +100,7 @@ primary_def: PRIMARY_KEY
 	YYACCEPT;
 }
 
+/*
 foreign_def: FOREIGN_KEY '(' var_def ')'
 	     REFERENCES obj_name '(' var_def ')'
 {
@@ -110,6 +110,7 @@ foreign_def: FOREIGN_KEY '(' var_def ')'
 	YYACCEPT;
 }
 ;
+*/
 
 proc_def: mk_def PROC obj_name
 {
@@ -199,20 +200,31 @@ mk_def: CREATE
 
 check_def: constraint_def CHECK
 {
+	$$ = $2;
+	@$ = @2;
+}
+	| constraint_def FOREIGN_KEY
+{
+	$$ = $2;
 	@$ = @2;
 }
 ;
 
 with_check_def: check_def
+{
+	put_check(WITH_CHECK, $1, @1.first_column, @1.first_line,
+	      	  @1.last_column, @1.last_line);
+	YYACCEPT;
+}
 	| WITH_CHECK check_def
 {
-	put_check(WITH_CHECK, @2.first_column, @2.first_line,
+	put_check(WITH_CHECK, $2, @2.first_column, @2.first_line,
 	      	  @2.last_column, @2.last_line);
 	YYACCEPT;
 }
 	| WITH_NOCHECK check_def
 {
-	put_check(WITH_NOCHECK, @2.first_column, @2.first_line,
+	put_check(WITH_NOCHECK, $2, @2.first_column, @2.first_line,
 	      	  @2.last_column, @2.last_line);
 	YYACCEPT;
 }

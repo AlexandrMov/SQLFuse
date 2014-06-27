@@ -450,13 +450,61 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
   return reslist;
 }
 
+char * make_foreign_def(struct sqlfs_ms_obj *obj)
+{
+  char *text = NULL;
+
+
+  return text;
+}
+
+GList * fetch_foreigns(int tid. const char *name, GError **error)
+{
+  GList *reslist = NULL;
+  GError *terr = NULL;
+  GString *sql = g_string_new(NULL);
+
+  /*
+    SELECT
+    fk.name, fk.object_id, fk.is_disabled
+    , fk.is_not_for_replication, fk.delete_referential_action
+    , fk.update_referential_action
+    , fk.create_date, fk.modify_date
+    ,(( SELECT sc_own.name + ', '
+	FROM sys.foreign_key_columns fkc
+	INNER JOIN sys.columns sc_own
+	  ON sc_own.column_id = fkc.parent_column_id
+	    AND sc_own.object_id = fkc.parent_object_id 
+	WHERE fkc.constraint_object_id = fk.object_id
+	FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)')) own
+    ,((	SELECT sc_ref.name + ', '
+	FROM sys.foreign_key_columns fkc
+	INNER JOIN sys.columns sc_ref
+	  ON sc_ref.column_id = fkc.referenced_column_id
+	    AND sc_ref.object_id = fkc.referenced_object_id
+	WHERE fkc.constraint_object_id = fk.object_id
+	FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)')) ref
+	, SCHEMA_NAME(so_ref.schema_id), so_ref.name
+FROM sys.foreign_keys fk 
+	INNER JOIN sys.objects so_ref ON fk.referenced_object_id = so_ref.object_id
+WHERE fk.object_id = 1131151075
+   */
+  g_string_free(sql, TRUE);
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+  
+  return reslist;
+  
+}
 
 char * make_index_def(const struct sqlfs_ms_obj *obj)
 {
-  if (!obj || !obj->index)
-    return NULL;
+  char *text = NULL;
 
-  return NULL;
+  
+  
+  return text;
 }
 
 GList * fetch_indexes(int tid, const char *name, GError **error)
