@@ -123,8 +123,13 @@ struct sqlfs_ms_module {
 };
 
 struct sqlfs_ms_fk {
-  int delact;
-  int updact;
+  int delact, updact;
+
+  char *columns_def;
+  char *ref_object_def;
+  char *ref_columns_def;
+
+  char *def;
 };
 
 struct sqlfs_ms_index {
@@ -140,6 +145,9 @@ struct sqlfs_ms_index {
   char *filter_def;
   char *columns_def;
   char *incl_columns_def;
+  char *data_space;
+
+  char *def;
 };
 
 struct sqlfs_ms_obj {

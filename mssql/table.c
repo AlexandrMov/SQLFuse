@@ -81,7 +81,7 @@ char * create_constr_def(const char *schema, const char *table,
   return result;
 }
 
-char * make_column_def(const struct sqlfs_ms_obj *obj)
+char * make_column_def(struct sqlfs_ms_obj *obj)
 {
   if (!obj || !obj->column)
     return NULL;
@@ -306,7 +306,7 @@ GList * fetch_modules(int tid, const char *name, GError **error)
   return list;
 }
 
-char * make_constraint_def(const struct sqlfs_ms_obj *ctrt, const char *def)
+char * make_constraint_def(struct sqlfs_ms_obj *ctrt, const char *def)
 {
   if (!ctrt || !ctrt->clmn_ctrt || !def)
     return NULL;
@@ -329,7 +329,7 @@ char * make_constraint_def(const struct sqlfs_ms_obj *ctrt, const char *def)
 			     ctrt->name);
       
       if (ctrt->clmn_ctrt->not4repl == TRUE)
-	g_string_append_printf(sql, "NOT FOR REPLICATION ", def);
+	g_string_append(sql, "NOT FOR REPLICATION ");
 
       g_string_append_printf(sql, "(%s)", def);
     }
@@ -454,16 +454,17 @@ char * make_foreign_def(struct sqlfs_ms_obj *obj)
 {
   char *text = NULL;
 
+  
 
   return text;
 }
 
-GList * fetch_foreigns(int tid. const char *name, GError **error)
+GList * fetch_foreigns(int tid, const char *name, GError **error)
 {
   GList *reslist = NULL;
   GError *terr = NULL;
   GString *sql = g_string_new(NULL);
-
+  
   /*
     SELECT
     fk.name, fk.object_id, fk.is_disabled
@@ -498,11 +499,74 @@ WHERE fk.object_id = 1131151075
   
 }
 
-char * make_index_def(const struct sqlfs_ms_obj *obj)
+#define IDX_PRMS_BOOL(sql, field, param)	\
+  g_string_append(sql, "%s = ", param);		\
+  if (idx->field == TRUE)			\
+    g_string_append(sql, "ON ");		\
+  else						\
+    g_string_append(sql, "OFF ");
+
+#define IDX_PRMS_INT(sql, field, param)		\
+  g_string_append_printf(sql, "%s = ", param);	\
+  g_string_append_printf(sql, "%d ", field);
+
+#define INS_COMMA(sql) g_string_append(sql, ", ");
+
+
+char * make_index_def(const char *schema, const char *table,
+		      struct sqlfs_ms_obj *idx)
 {
   char *text = NULL;
+  GString *sql = g_string_new(NULL);
 
+  if (idx->type == R_PK || idx->type == R_UQ) {
+    g_string_append_printf(sql, "CONSTRAINT %s ", idx->name);
+
+    if (idx->type == R_PK)
+      g_string_append(sql, "PRIMARY KEY CLUSTERED ");
+    else
+      if (idx->type == R_UQ)
+	g_string_append(sql, "UNIQUE NONCLUSTERED ");
+
+  }
+  else
+    if (idx->type == R_X) {
+      g_string_append_printf(sql, "NONCLUSTERED INDEX [%s] ", idx->name);
+      g_string_append_printf(sql, "ON [%s].[%s] ", schema, table);
+    }
+
+  g_string_append_printf(sql, "( %s ) ", idx->columns_def);
   
+  if (idx->incl_columns_def != NULL) {
+    g_string_append_printf(sql, "INCLUDE ( %s ) ", idx->incl_columns_def);
+  }
+  
+  g_string_append(sql, "WITH ( ");
+  IDX_PRMS_BOOL(sql, "PAD_INDEX", idx->is_padded);
+  INS_COMMA(sql);
+  
+  IDX_PRMS_BOOL(sql, "IGNORE_DUP_KEY", idx->ignore_dup_key);
+  INS_COMMA(sql);
+  
+  IDX_PRMS_BOOL(sql, "ALLOW_ROW_LOCKS", idx->allow_rl);
+  INS_COMMA(sql);
+  
+  IDX_PRMS_BOOL(sql, "ALLOW_PAGE_LOCKS", idx->allow_pl);
+  
+  if (idx->fill_factor > 0) {
+    INS_COMMA(sql);
+    IDX_PRMS_INT(sql, "FILLFACTOR", idx->fill_factor);
+  }
+  
+  g_string_append(sql, " )");
+
+  if (idx->data_space != NULL)
+    g_string_append_printf(sql, " ON [%s]", idx->data_space);
+  
+  g_string_append(sql, "\n");
+  
+  text = g_strdup(sql->str);
+  g_string_free(sql, TRUE);
   
   return text;
 }
@@ -522,7 +586,7 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
   g_string_append(sql, ", si.is_padded, si.is_disabled, si.is_hypothetical");
   g_string_append(sql, ", si.allow_row_locks, si.allow_page_locks");
   g_string_append(sql, ", si.has_filter, si.filter_definition");
-  
+
   g_string_append(sql, ",((SELECT sc.name ");
   g_string_append(sql, " +  CASE ic.is_descending_key WHEN 1 THEN ' DESC'");
   g_string_append(sql, "     ELSE ' ASC' END + ','");
@@ -544,9 +608,13 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
   g_string_append(sql, "     AND ic.object_id = si.object_id");
   g_string_append(sql, "     AND ic.is_included_column = 1");
   g_string_append(sql, "   FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)') )");
+
+  g_string_append(sql, ", ds.name, SCHEMA_NAME(so.object_id), so.name");
   
   g_string_append(sql, " FROM sys.objects so INNER JOIN sys.indexes si");
   g_string_append(sql, "   ON si.object_id = so.object_id");
+  g_string_append(sql, " INNER JOIN sys.data_spaces ds");
+  g_string_append(sql, "   ON ds.data_space_id = si.data_space_id");
   g_string_append_printf(sql, " WHERE so.object_id = %d", tid);
 
   if (name)
@@ -560,6 +628,9 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
     char *filter_def = g_malloc0_n(dbcollen(ctx->dbproc, 19) + 1, sizeof(char ));
     char *col_def = g_malloc0_n(dbcollen(ctx->dbproc, 20) + 1, sizeof(char ));
     char *incl_def = g_malloc0_n(dbcollen(ctx->dbproc, 21) + 1, sizeof(char ));
+    char *data_space = g_malloc0_n(dbcollen(ctx->dbproc, 22) + 1, sizeof(char ));
+    char *schema_name = g_malloc0_n(dbcollen(ctx->dbproc, 23) + 1, sizeof(char ));
+    char *table_name = g_malloc0_n(dbcollen(ctx->dbproc, 24) + 1, sizeof(char ));
     DBINT cdate_buf, mdate_buf, fill_factor, is_padded, is_disabled, is_hyp;
     DBINT allow_rl, allow_pl, has_filter;
 
@@ -588,6 +659,12 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 	   dbcollen(ctx->dbproc, 20), (BYTE *) col_def);
     dbbind(ctx->dbproc, 21, STRINGBIND,
 	   dbcollen(ctx->dbproc, 21), (BYTE *) incl_def);
+    dbbind(ctx->dbproc, 22, STRINGBIND,
+	   dbcollen(ctx->dbproc, 22), (BYTE *) data_space);
+    dbbind(ctx->dbproc, 23, STRINGBIND,
+	   dbcollen(ctx->dbproc, 23), (BYTE *) schema_name);
+    dbbind(ctx->dbproc, 24, STRINGBIND,
+	   dbcollen(ctx->dbproc, 24), (BYTE *) table_name);
   
     int rowcode;
     struct sqlfs_ms_obj *obj = NULL;
@@ -626,7 +703,11 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 	if (incl_def)
 	  idx->incl_columns_def = g_strdup(incl_def);
 
+	if (data_space)
+	  idx->data_space = g_strdup(data_space);
+	
 	obj->index = idx;
+	idx->def = make_index_def(schema_name, table_name, obj);	
 	obj->cached_time = g_get_monotonic_time();
 
 	reslist = g_list_append(reslist, obj);
@@ -641,12 +722,13 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 	break;
       }
     }
-    
+
+    g_free(data_space);
     g_free(name_buf);
     g_free(filter_def);
     g_free(col_def);
     g_free(incl_def);
-
+    g_free(schema_name);
   }
   
   close_sql(ctx);
