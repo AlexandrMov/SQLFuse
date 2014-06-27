@@ -30,6 +30,13 @@ char * create_column_def(const char *schema, const char *table,
  */
 char * make_column_def(struct sqlfs_ms_obj *obj);
 
+
+/*
+ * Вернёт SQL-запрос создающий/редактирующий индекс
+ */
+char * create_index_def(const char *schema, const char *table,
+			struct sqlfs_ms_obj *obj, const char *def);
+
 /*
  * Вернёт SQLFuse-определение индекса
  */

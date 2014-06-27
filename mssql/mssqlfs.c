@@ -330,6 +330,12 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
     if (obj->clmn_ctrt)
       def = g_strdup(obj->clmn_ctrt->def);
     break;
+  case R_PK:
+  case R_UQ:
+  case R_X:
+    if (obj->index != NULL)
+      def = g_strdup(obj->index->def);
+    break;
   default:
     def = load_help_text(parent, obj, &terr);
     break;
@@ -377,8 +383,8 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
   if (terr == NULL)
     reslist = g_list_concat(reslist, fetch_modules(table_id, name, &terr));
 
-  /*if (terr == NULL)
-    reslist = g_list_concat(reslist, fetch_indexes(table_id, name, &terr));*/
+  if (terr == NULL)
+    reslist = g_list_concat(reslist, fetch_indexes(table_id, name, &terr));
 
   if (terr == NULL) {
     reslist = g_list_concat(reslist, fetch_constraints(table_id, name, &terr));

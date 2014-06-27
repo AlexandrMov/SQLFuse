@@ -394,7 +394,6 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
     dbbind(ctx->dbproc, 8, INTBIND, (DBINT) 0, (BYTE *) &cdate_buf);
     dbbind(ctx->dbproc, 9, INTBIND, (DBINT) 0, (BYTE *) &mdate_buf);
 
-
     int rowcode;
     struct sqlfs_ms_obj *obj = NULL;
     
@@ -499,63 +498,110 @@ WHERE fk.object_id = 1131151075
   
 }
 
-#define IDX_PRMS_BOOL(sql, field, param)	\
-  g_string_append(sql, "%s = ", param);		\
-  if (idx->field == TRUE)			\
+#define IDX_PRMS_BOOL(sql, field)		\
+  if (field == TRUE)				\
     g_string_append(sql, "ON ");		\
   else						\
     g_string_append(sql, "OFF ");
 
-#define IDX_PRMS_INT(sql, field, param)		\
-  g_string_append_printf(sql, "%s = ", param);	\
+#define IDX_PRMS_INT(sql, field)		\
   g_string_append_printf(sql, "%d ", field);
 
 #define INS_COMMA(sql) g_string_append(sql, ", ");
 
 
-char * make_index_def(const char *schema, const char *table,
-		      struct sqlfs_ms_obj *idx)
+char * create_index_def(const char *schema, const char *table,
+			struct sqlfs_ms_obj *obj, const char *def)
 {
-  char *text = NULL;
+  char *result = NULL;
   GString *sql = g_string_new(NULL);
 
-  if (idx->type == R_PK || idx->type == R_UQ) {
-    g_string_append_printf(sql, "CONSTRAINT %s ", idx->name);
-
-    if (idx->type == R_PK)
-      g_string_append(sql, "PRIMARY KEY CLUSTERED ");
-    else
-      if (idx->type == R_UQ)
-	g_string_append(sql, "UNIQUE NONCLUSTERED ");
-
-  }
-  else
-    if (idx->type == R_X) {
-      g_string_append_printf(sql, "NONCLUSTERED INDEX [%s] ", idx->name);
-      g_string_append_printf(sql, "ON [%s].[%s] ", schema, table);
+  if (obj->type == R_PK || obj->type == R_UQ) {
+    g_string_append_printf(sql, "ALTER TABLE [%s].[%s]", schema, table);
+    if (obj->object_id) {
+      g_string_append_printf(sql, " DROP CONSTRAINT [%s] \n", obj->name);
+      g_string_append_printf(sql, "ALTER TABLE [%s].[%s]", schema, table); 
     }
 
-  g_string_append_printf(sql, "( %s ) ", idx->columns_def);
+    g_string_append_printf(sql, " ADD CONSTRAINT [%s] ", obj->name);
+
+    if (obj->type == R_PK) {
+      g_string_append(sql, "PRIMARY KEY");
+    }
+    else {
+      g_string_append(sql, "UNIQUE NONCLUSTERED ");
+    }
+
+  } else {
+    if (obj->object_id)
+      g_string_append(sql, "CREATE ");
+    else
+      g_string_append(sql, "ALTER ");
+    if (obj->index != NULL && obj->index->is_unique)
+      g_string_append_printf(sql, "UNIQUE ");
+
+    g_string_append_printf(sql, "NONCLUSTERED INDEX [%s] ", obj->name);
+    g_string_append_printf(sql, "ON [%s].[%s] ", schema, table);
+  }
   
+  g_string_append_printf(sql, " %s", def);
+  
+  result = g_strdup(sql->str);
+  g_string_free(sql, TRUE);
+  return result;
+}
+
+char * make_index_def(const char *schema, const char *table,
+		      struct sqlfs_ms_obj *obj)
+{
+  char *text = NULL;
+  struct sqlfs_ms_index *idx = obj->index;
+  GString *sql = g_string_new(NULL);
+
+  if (obj->type == R_PK || obj->type == R_UQ) {
+    g_string_append_printf(sql, "CONSTRAINT %s ", obj->name);
+
+    if (obj->type == R_PK)
+      g_string_append(sql, "PRIMARY KEY CLUSTERED ");
+    else
+      if (obj->type == R_UQ)
+	g_string_append(sql, "UNIQUE NONCLUSTERED ");
+    
+  }
+  else {
+    if (idx->is_unique)
+      g_string_append(sql, "UNIQUE ");
+    
+    g_string_append_printf(sql, "NONCLUSTERED INDEX [%s] ", obj->name);
+    g_string_append_printf(sql, "ON [%s].[%s] ", schema, table);
+  }
+
+  g_string_append_printf(sql, "( %s ) ", idx->columns_def);
+
   if (idx->incl_columns_def != NULL) {
     g_string_append_printf(sql, "INCLUDE ( %s ) ", idx->incl_columns_def);
   }
   
   g_string_append(sql, "WITH ( ");
-  IDX_PRMS_BOOL(sql, "PAD_INDEX", idx->is_padded);
+  g_string_append(sql, "PAD_INDEX = ");
+  IDX_PRMS_BOOL(sql, idx->is_padded);
   INS_COMMA(sql);
-  
-  IDX_PRMS_BOOL(sql, "IGNORE_DUP_KEY", idx->ignore_dup_key);
+
+  g_string_append(sql, "IGNORE_DUP_KEY = ");
+  IDX_PRMS_BOOL(sql, idx->ignore_dup_key);
   INS_COMMA(sql);
-  
-  IDX_PRMS_BOOL(sql, "ALLOW_ROW_LOCKS", idx->allow_rl);
+
+  g_string_append(sql, "ALLOW_ROW_LOCKS = ");
+  IDX_PRMS_BOOL(sql, idx->allow_rl);
   INS_COMMA(sql);
-  
-  IDX_PRMS_BOOL(sql, "ALLOW_PAGE_LOCKS", idx->allow_pl);
+
+  g_string_append(sql, "ALLOW_PAGE_LOCKS = ");
+  IDX_PRMS_BOOL(sql, idx->allow_pl);
   
   if (idx->fill_factor > 0) {
     INS_COMMA(sql);
-    IDX_PRMS_INT(sql, "FILLFACTOR", idx->fill_factor);
+    g_string_append(sql, "FILLFACTOR = ");
+    IDX_PRMS_INT(sql, idx->fill_factor);
   }
   
   g_string_append(sql, " )");
@@ -589,7 +635,7 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 
   g_string_append(sql, ",((SELECT sc.name ");
   g_string_append(sql, " +  CASE ic.is_descending_key WHEN 1 THEN ' DESC'");
-  g_string_append(sql, "     ELSE ' ASC' END + ','");
+  g_string_append(sql, "     ELSE ' ASC' END + ', '");
   g_string_append(sql, "   FROM sys.index_columns ic INNER JOIN sys.columns sc");
   g_string_append(sql, "    ON sc.column_id = ic.column_id ");
   g_string_append(sql, "     AND sc.object_id = ic.object_id");
@@ -600,7 +646,7 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 
   g_string_append(sql, ",((SELECT sc.name ");
   g_string_append(sql, " +  CASE ic.is_descending_key WHEN 1 THEN ' DESC'");
-  g_string_append(sql, "     ELSE ' ASC' END + ','");
+  g_string_append(sql, "     ELSE ' ASC' END + ', '");
   g_string_append(sql, "   FROM sys.index_columns ic INNER JOIN sys.columns sc");
   g_string_append(sql, "    ON sc.column_id = ic.column_id ");
   g_string_append(sql, "     AND sc.object_id = ic.object_id");
@@ -609,7 +655,7 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
   g_string_append(sql, "     AND ic.is_included_column = 1");
   g_string_append(sql, "   FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)') )");
 
-  g_string_append(sql, ", ds.name, SCHEMA_NAME(so.object_id), so.name");
+  g_string_append(sql, ", ds.name, SCHEMA_NAME(so.schema_id), so.name");
   
   g_string_append(sql, " FROM sys.objects so INNER JOIN sys.indexes si");
   g_string_append(sql, "   ON si.object_id = so.object_id");
@@ -668,7 +714,7 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
   
     int rowcode;
     struct sqlfs_ms_obj *obj = NULL;
-  
+    char *wstr = NULL;
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
@@ -679,6 +725,14 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 	obj->name = g_strdup(name_buf);
 	obj->mtime = mdate_buf;
 	obj->ctime = cdate_buf;
+	
+	if (is_pk == TRUE)
+	  obj->type = R_PK;
+	else
+	  if (is_uqc == TRUE)
+	    obj->type = R_UQ;
+	  else
+	    obj->type = R_X;
 
 	struct sqlfs_ms_index *idx = g_try_new0(struct sqlfs_ms_index, 1);
 	idx->type_id = type_id;
@@ -695,19 +749,26 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 	idx->has_filter = has_filter;
 
 	if (has_filter)
-	  idx->filter_def = g_strdup(filter_def);
+	  idx->filter_def = g_strdup(g_strchomp(filter_def));
+	
+	if (col_def) {
+	  wstr = g_strchomp(col_def);
+	  idx->columns_def = g_strndup(wstr, strlen(wstr) - 1);
+	}
 
-	if (col_def)
-	  idx->columns_def = g_strdup(col_def);
-
-	if (incl_def)
-	  idx->incl_columns_def = g_strdup(incl_def);
+	if (incl_def != NULL) {
+	  wstr = g_strchomp(incl_def);
+	  if (strlen(wstr) > 0)
+	    idx->incl_columns_def = g_strndup(wstr, strlen(wstr) - 1);
+	}
 
 	if (data_space)
-	  idx->data_space = g_strdup(data_space);
+	  idx->data_space = g_strdup(g_strchomp(data_space));
 	
 	obj->index = idx;
-	idx->def = make_index_def(schema_name, table_name, obj);	
+	idx->def = make_index_def(g_strchomp(schema_name),
+				  g_strchomp(table_name), obj);
+	obj->len = strlen(idx->def);
 	obj->cached_time = g_get_monotonic_time();
 
 	reslist = g_list_append(reslist, obj);
