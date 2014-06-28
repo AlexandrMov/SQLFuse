@@ -174,12 +174,11 @@ GList * fetch_columns(int tid, const char *name, GError **error)
     dbbind(ctx->dbproc, 13, INTBIND, (DBINT) 0, (BYTE *) &not4repl);
   
     int rowcode;
-    struct sqlfs_ms_obj * obj = NULL;
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
-      case REG_ROW:
-	obj = g_try_new0(struct sqlfs_ms_obj, 1);
-
+      case REG_ROW: {
+	struct sqlfs_ms_obj *obj = g_try_new0(struct sqlfs_ms_obj, 1);
+	
 	obj->object_id = col_id_buf;
 	obj->name = g_strdup(trimwhitespace(colname_buf));
 	obj->type = R_COL;
@@ -204,6 +203,7 @@ GList * fetch_columns(int tid, const char *name, GError **error)
 	obj->len = strlen(obj->column->def);	
       
 	reslist = g_list_append(reslist, obj);
+      }
 	break;
       case BUF_FULL:
 	g_set_error(&terr, EEFULL, EEFULL,
@@ -458,37 +458,120 @@ char * make_foreign_def(struct sqlfs_ms_obj *obj)
   return text;
 }
 
-GList * fetch_foreigns(int tid, const char *name, GError **error)
+GList * fetch_foreignes(int tid, const char *name, GError **error)
 {
   GList *reslist = NULL;
   GError *terr = NULL;
   GString *sql = g_string_new(NULL);
+
+  g_string_append(sql, "SELECT fk.name, fk.object_id, fk.is_disabled");
+  g_string_append(sql, ", fk.is_not_for_replication");
+  g_string_append(sql, ", fk.delete_referential_action");
+  g_string_append(sql, ", fk.update_referential_action");
+  g_string_append(sql, ",((SELECT sc_own.name + ', '");
+  g_string_append(sql, "   FROM sys.foreign_key_columns fkc");
+  g_string_append(sql, "   INNER JOIN sys.columns sc_own");
+  g_string_append(sql, "     ON sc_own.column_id = fkc.parent_column_id");
+  g_string_append(sql, "       AND sc_own.object_id = fkc.parent_object_id");
+  g_string_append(sql, "   WHERE fkc.constraint_object_id = fk.object_id");
+  g_string_append(sql, "   FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'))");
+
+  g_string_append(sql, ",((SELECT sc_ref.name + ', '");
+  g_string_append(sql, "   FROM sys.foreign_key_columns fkc");
+  g_string_append(sql, "   INNER JOIN sys.columns sc_ref");
+  g_string_append(sql, "     ON sc_ref.column_id = fkc.referenced_column_id");
+  g_string_append(sql, "       AND sc_ref.object_id = fkc.referenced_object_id");
+  g_string_append(sql, "    WHERE fkc.constraint_object_id = fk.object_id");
+  g_string_append(sql, "    FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'))");
   
-  /*
-    SELECT
-    fk.name, fk.object_id, fk.is_disabled
-    , fk.is_not_for_replication, fk.delete_referential_action
-    , fk.update_referential_action
-    , fk.create_date, fk.modify_date
-    ,(( SELECT sc_own.name + ', '
-	FROM sys.foreign_key_columns fkc
-	INNER JOIN sys.columns sc_own
-	  ON sc_own.column_id = fkc.parent_column_id
-	    AND sc_own.object_id = fkc.parent_object_id 
-	WHERE fkc.constraint_object_id = fk.object_id
-	FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)')) own
-    ,((	SELECT sc_ref.name + ', '
-	FROM sys.foreign_key_columns fkc
-	INNER JOIN sys.columns sc_ref
-	  ON sc_ref.column_id = fkc.referenced_column_id
-	    AND sc_ref.object_id = fkc.referenced_object_id
-	WHERE fkc.constraint_object_id = fk.object_id
-	FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)')) ref
-	, SCHEMA_NAME(so_ref.schema_id), so_ref.name
-FROM sys.foreign_keys fk 
-	INNER JOIN sys.objects so_ref ON fk.referenced_object_id = so_ref.object_id
-WHERE fk.object_id = 1131151075
-   */
+  g_string_append(sql, ", SCHEMA_NAME(so_ref.schema_id), so_ref.name");
+  g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, fk.create_date)");
+  g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, fk.modify_date)");
+  g_string_append(sql, " FROM sys.foreign_keys fk INNER JOIN sys.objects so_ref");
+  g_string_append(sql, "  ON fk.referenced_object_id = so_ref.object_id");
+  g_string_append_printf(sql, " WHERE fk.parent_object_id = %d", tid);
+
+  if (name)
+    g_string_append_printf(sql, " AND fk.name = '%s'", name);
+
+  msctx_t *ctx = exec_sql(sql->str, &terr);
+  if (!terr) {
+    DBINT obj_id, is_not4repl, delact, updact, mdate, cdate, disabled;
+    char *name_def = g_malloc0_n(dbcollen(ctx->dbproc, 1) + 1, sizeof(char ));
+    char *own_def = g_malloc0_n(dbcollen(ctx->dbproc, 7) + 1, sizeof(char ));
+    char *ref_def = g_malloc0_n(dbcollen(ctx->dbproc, 8) + 1, sizeof(char ));
+    char *schema_name = g_malloc0_n(dbcollen(ctx->dbproc, 9) + 1, sizeof(char ));
+    char *ref_name = g_malloc0_n(dbcollen(ctx->dbproc, 10) + 1, sizeof(char ));
+
+    dbbind(ctx->dbproc, 1, STRINGBIND,
+	   dbcollen(ctx->dbproc, 1), (BYTE *) name_def);
+    dbbind(ctx->dbproc, 2, INTBIND, (DBINT) 0, (BYTE *) &obj_id);
+    dbbind(ctx->dbproc, 3, INTBIND, (DBINT) 0, (BYTE *) &disabled);
+    dbbind(ctx->dbproc, 4, INTBIND, (DBINT) 0, (BYTE *) &is_not4repl);
+    dbbind(ctx->dbproc, 5, INTBIND, (DBINT) 0, (BYTE *) &delact);
+    dbbind(ctx->dbproc, 6, INTBIND, (DBINT) 0, (BYTE *) &updact);
+    dbbind(ctx->dbproc, 7, STRINGBIND,
+	   dbcollen(ctx->dbproc, 7), (BYTE *) own_def);
+    dbbind(ctx->dbproc, 8, STRINGBIND,
+	   dbcollen(ctx->dbproc, 8), (BYTE *) ref_def);
+    dbbind(ctx->dbproc, 9, STRINGBIND,
+	   dbcollen(ctx->dbproc, 9), (BYTE *) schema_name);
+    dbbind(ctx->dbproc, 10, STRINGBIND,
+	   dbcollen(ctx->dbproc, 10), (BYTE *) ref_name);
+    dbbind(ctx->dbproc, 11, INTBIND, (DBINT) 0, (BYTE *) &cdate);
+    dbbind(ctx->dbproc, 12, INTBIND, (DBINT) 0, (BYTE *) &mdate);
+
+    int rowcode;
+    while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
+      switch(rowcode) {
+      case REG_ROW: {
+	struct sqlfs_ms_obj *obj = g_try_new0(struct sqlfs_ms_obj, 1);
+	obj->object_id = obj_id;
+	obj->parent_id = tid;
+	obj->name = g_strdup(g_strchomp(name_def));
+	obj->mtime = mdate;
+	obj->ctime = cdate;
+	obj->type = R_F;
+
+	struct sqlfs_ms_fk *fk = g_try_new0(struct sqlfs_ms_fk, 1);
+	fk->delact = delact;
+	fk->updact = updact;
+	fk->not4repl = is_not4repl;
+	fk->columns_def = g_strdup(g_strchomp(own_def));
+	schema_name = g_strchomp(schema_name);
+	ref_name = g_strchomp(ref_name);
+	fk->ref_object_def = g_strconcat("[", schema_name, "].[",
+					 ref_name, "]", NULL);
+	fk->ref_columns_def = g_strdup(g_strchomp(ref_def));
+
+	obj->foreign_ctrt = fk;
+	obj->foreign_ctrt->def = make_foreign_def(obj);
+	obj->len = 0; //strlen(fk->def);
+
+	obj->cached_time = g_get_monotonic_time();
+	reslist = g_list_append(reslist, obj);
+      }
+	break;
+      case BUF_FULL:
+	g_set_error(&terr, EEFULL, EEFULL,
+		    "%d: dbresults failed\n", __LINE__);
+	break;
+      case FAIL:
+	g_set_error(&terr, EERES, EERES,
+		    "%d: dbresults failed\n", __LINE__);
+	break;
+      }
+    }
+    
+    g_free(name_def);
+    g_free(own_def);
+    g_free(ref_def);
+    g_free(schema_name);
+    g_free(ref_name);
+    
+  }
+
+  close_sql(ctx);
   g_string_free(sql, TRUE);
   
   if (terr != NULL)
@@ -529,7 +612,7 @@ char * create_index_def(const char *schema, const char *table,
       g_string_append(sql, "PRIMARY KEY");
     }
     else {
-      g_string_append(sql, "UNIQUE NONCLUSTERED ");
+      g_string_append(sql, "UNIQUE NONCLUSTERED");
     }
 
   } else {
@@ -790,6 +873,7 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
     g_free(col_def);
     g_free(incl_def);
     g_free(schema_name);
+    g_free(table_name);
   }
   
   close_sql(ctx);

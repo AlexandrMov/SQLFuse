@@ -378,21 +378,24 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
   GList *reslist = NULL;
   GError *terr = NULL;
 
+  /* TODO: Кандидаты на распараллелирование */
   reslist = fetch_columns(table_id, name, &terr);
-  
+
   if (terr == NULL)
     reslist = g_list_concat(reslist, fetch_modules(table_id, name, &terr));
 
   if (terr == NULL)
     reslist = g_list_concat(reslist, fetch_indexes(table_id, name, &terr));
 
-  if (terr == NULL) {
+  if (terr == NULL)
     reslist = g_list_concat(reslist, fetch_constraints(table_id, name, &terr));
-  }
 
-  if (terr != NULL) {
-    g_message("%d: %s\n", terr->code, terr->message);
-  }
+  if (terr == NULL)
+    reslist = g_list_concat(reslist, fetch_foreignes(table_id, name, &terr));
+
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
   
   return reslist;
 }
@@ -432,13 +435,13 @@ GList * fetch_schema_obj(int schema_id, const char *name,
     dbbind(ctx->dbproc, 4, INTBIND, (DBINT) 0, (BYTE *) &cdate_buf);
     dbbind(ctx->dbproc, 5, INTBIND, (DBINT) 0, (BYTE *) &mdate_buf);
     dbbind(ctx->dbproc, 6, INTBIND, (DBINT) 0, (BYTE *) &def_len_buf);
+    
     int rowcode;
-    struct sqlfs_ms_obj * obj = NULL;
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
 	name_buf = trimwhitespace(name_buf);
-	obj = g_try_new0(struct sqlfs_ms_obj, 1);
+	struct sqlfs_ms_obj *obj = g_try_new0(struct sqlfs_ms_obj, 1);
 	obj->name = g_strdup(name_buf);
 	obj->type = str2mstype(trimwhitespace(type_buf));
 	obj->schema_id = schema_id;
@@ -494,15 +497,15 @@ GList * fetch_schemas(const char *name, GError **error)
     dbbind(ctx->dbproc, 2, STRINGBIND, dbcollen(ctx->dbproc, 2) + 1,
 	   (BYTE *) schname_buf);
 
-    struct sqlfs_ms_obj *obj = NULL;
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
-      case REG_ROW:
-	obj = g_try_new0(struct sqlfs_ms_obj, 1);
-	obj->name = g_strdup(trimwhitespace(schname_buf));
+      case REG_ROW: {
+	struct sqlfs_ms_obj *obj = g_try_new0(struct sqlfs_ms_obj, 1);
+	obj->name = g_strdup(g_strchomp(schname_buf));
 	obj->type = D_SCHEMA;
 	obj->schema_id = schid_buf;
 	lst = g_list_append(lst, obj);
+      }
 	break;
       case BUF_FULL:
 	g_set_error(&terr, EEFULL, EEFULL,

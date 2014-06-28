@@ -55,6 +55,17 @@ char * create_constr_def(const char *schema, const char *table,
 char * make_constraint_def(struct sqlfs_ms_obj *obj, const char *def);
 
 /*
+ * Вернёт SQL-запрос, создающий новое ограничение FOREIGN KEY в таблице
+ */
+char * create_foreign_def(const char *schema, const char *table,
+			  struct sqlfs_ms_obj *obj, const char *def);
+
+/*
+ * Вернёт SQLFuse-определение ограничения FOREIGN KEY
+ */
+char * make_foreign_def(struct sqlfs_ms_obj *obj);
+
+/*
  * Вернёт список столбцов у таблицы %table_id
  */
 GList * fetch_columns(int table_id, const char *name, GError **err);
@@ -73,3 +84,9 @@ GList * fetch_indexes(int table_id, const char *name, GError **err);
  * Вернёт список ограничений CHECK и DEFAULT у таблицы %table_id
  */
 GList * fetch_constraints(int table_id, const char *name, GError **err);
+
+/*
+ * Вернёт список ограничений FOREIGN KEY у таблицы %table_id
+ */
+GList * fetch_foreignes(int table_id, const char *name, GError **err);
+

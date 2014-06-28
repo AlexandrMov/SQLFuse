@@ -124,6 +124,7 @@ struct sqlfs_ms_module {
 
 struct sqlfs_ms_fk {
   int delact, updact;
+  int not4repl, disabled;
 
   char *columns_def;
   char *ref_object_def;
