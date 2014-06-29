@@ -113,6 +113,15 @@ struct sqlfs_ms_obj * find_ms_object(const struct sqlfs_ms_obj *parent,
   return result;
 }
 
+#define CHECK_NODE(node, ctrt, def)					\
+  if (node != NULL) {							\
+    ctrt = g_try_new0(def, 1);						\
+    if (node->check == WITH_CHECK)					\
+      ctrt->disabled = 0;						\
+    else								\
+      ctrt->disabled = 1;						\
+  }									
+  
 void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 		     const char *text, struct sqlfs_ms_obj *obj, GError **err)
 {
@@ -121,6 +130,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
   start_checker();
 
   YY_BUFFER_STATE bp;
+  g_message("-- %s -- ", text);
   bp = yy_scan_string(text);
   yy_switch_to_buffer(bp);  
   error = yyparse();
@@ -138,13 +148,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       break;
     case CHECK:
       obj->type = R_C;
-      if (node->check_node != NULL) {
-	obj->clmn_ctrt = g_try_new0(struct sqlfs_ms_constraint, 1);
-	if (node->check_node->check == WITH_CHECK)
-	  obj->clmn_ctrt->disabled = 0;
-	else
-	  obj->clmn_ctrt->disabled = 1;
-      }
+      CHECK_NODE(node->check_node, obj->clmn_ctrt, struct sqlfs_ms_constraint);
       wrktext = create_constr_def(schema, parent->name, obj,
 				  text + node->last_column);
       break;
@@ -152,6 +156,28 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       obj->type = R_D;
       wrktext = create_constr_def(schema, parent->name, obj,
 				  text + node->first_column - 1);
+      break;
+    case PRIMARY_KEY:
+
+      obj->type = R_PK;
+      wrktext = create_index_def(schema, parent->name, obj,
+				 text + node->last_column);
+      break;
+    case FOREIGN_KEY:
+      obj->type = R_F;
+      CHECK_NODE(node->check_node, obj->foreign_ctrt, struct sqlfs_ms_fk);
+      wrktext = create_foreign_def(schema, parent->name, obj,
+				   text + node->last_column);
+      break;
+    case UNIQUE:
+      obj->type = R_UQ;
+      wrktext = create_index_def(schema, parent->name, obj,
+				 text + node->last_column);
+      break;
+    case INDEX:
+      obj->type = R_X;
+      wrktext = create_index_def(schema, parent->name, obj,
+				 text + node->last_column);
       break;
     case PROC:
     case FUNCTION:
@@ -207,7 +233,8 @@ void remove_ms_object(const char *schema, const char *parent,
     g_string_append_printf(sql, "ALTER TABLE [%s].[%s] DROP COLUMN [%s]",
 			   schema, parent, obj->name);
   }
-  else if (obj->type == R_C || obj->type == R_D) {
+  else if (obj->type == R_C || obj->type == R_D || obj->type == R_F
+	   || obj->type == R_PK || obj->type == R_UQ) {
     g_string_append_printf(sql, "ALTER TABLE [%s].[%s] DROP CONSTRAINT [%s]",
 			   schema, parent, obj->name);
   }
@@ -234,11 +261,17 @@ void remove_ms_object(const char *schema, const char *parent,
     case R_TR:
       g_string_append(sql, "TRIGGER");
       break;
+    case R_X:
+      g_string_append(sql, "INDEX");
     default:
       g_set_error(&terr, EENOTSUP, EENOTSUP, NULL);
     }
 
     g_string_append_printf(sql, " [%s].[%s]", schema, obj->name);
+
+    if (obj->type == R_X) {
+      g_string_append_printf(sql, " ON [%s].[%s]", schema, parent);
+    }
   }
   
   if (terr == NULL) {
@@ -336,6 +369,9 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
     if (obj->index != NULL)
       def = g_strdup(obj->index->def);
     break;
+  case R_F:
+    def = g_strdup(obj->foreign_ctrt->def);
+    break;
   default:
     def = load_help_text(parent, obj, &terr);
     break;
@@ -393,7 +429,7 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
   if (terr == NULL)
     reslist = g_list_concat(reslist, fetch_foreignes(table_id, name, &terr));
 
-  
+
   if (terr != NULL)
     g_propagate_error(error, terr);
   

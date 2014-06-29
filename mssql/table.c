@@ -22,6 +22,25 @@
 #include "exec.h"
 #include "util.h"
 
+#define ALT_CNSRT(sql, sch, tbl, obj)					\
+  g_string_append_printf(sql, "ALTER TABLE [%s].[%s]", sch, tbl);	\
+  if (obj->object_id) {							\
+    g_string_append_printf(sql, " DROP CONSTRAINT [%s] \n", obj->name);	\
+    g_string_append_printf(sql, "ALTER TABLE [%s].[%s]", sch, tbl);	\
+  }
+
+#define IDX_PRMS_BOOL(sql, field)		\
+  if (field == TRUE)				\
+    g_string_append(sql, "ON ");		\
+  else						\
+    g_string_append(sql, "OFF ");
+
+#define IDX_PRMS_INT(sql, field)		\
+  g_string_append_printf(sql, "%d ", field);
+
+#define INS_COMMA(sql) g_string_append(sql, ", ");
+
+
 char * create_column_def(const char *schema, const char *table,
 			 struct sqlfs_ms_obj *obj, const char *def)
 {
@@ -48,12 +67,8 @@ char * create_constr_def(const char *schema, const char *table,
   char *result = NULL;
 
   GString *sql = g_string_new(NULL);
-  g_string_append_printf(sql, "ALTER TABLE [%s].[%s]", schema, table);
-  if (obj->object_id) {
-    g_string_append_printf(sql, " DROP CONSTRAINT [%s] \n", obj->name);
-    g_string_append_printf(sql, "ALTER TABLE [%s].[%s]", schema, table);
-  }
 
+  ALT_CNSRT(sql, schema, table, obj);
   if (obj->type == R_C && obj->clmn_ctrt) {
     if (obj->clmn_ctrt->disabled)
       g_string_append(sql, " WITH NOCHECK ");
@@ -61,7 +76,7 @@ char * create_constr_def(const char *schema, const char *table,
       g_string_append(sql, " WITH CHECK ");
   }
 
-  g_string_append_printf(sql, " ADD CONSTRAINT [%s] ", obj->name);
+  g_string_append_printf(sql, "ADD CONSTRAINT [%s] ", obj->name);
 
   if (obj->type == R_C) {
     g_string_append_printf(sql, "CHECK", def);
@@ -313,8 +328,9 @@ char * make_constraint_def(struct sqlfs_ms_obj *ctrt, const char *def)
 
   char *text = NULL;
   GString *sql = g_string_new(NULL);
-
+  
   if (ctrt->type == R_D) {
+    g_string_append_printf(sql, "CONSTRAINT %s ", ctrt->name);
     g_string_append_printf(sql, "DEFAULT (%s) FOR %s",
 			   def, ctrt->clmn_ctrt->column_name);
   }
@@ -325,8 +341,7 @@ char * make_constraint_def(struct sqlfs_ms_obj *ctrt, const char *def)
       else
 	g_string_append(sql, "WITH CHECK ");
       
-      g_string_append_printf(sql, "CONSTRAINT %s CHECK ",
-			     ctrt->name);
+      g_string_append_printf(sql, "CONSTRAINT %s CHECK ", ctrt->name);
       
       if (ctrt->clmn_ctrt->not4repl == TRUE)
 	g_string_append(sql, "NOT FOR REPLICATION ");
@@ -449,11 +464,52 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
   return reslist;
 }
 
+char * create_foreign_def(const char *schema, const char *table,
+			  struct sqlfs_ms_obj *obj, const char *def)
+{
+  char *resql = NULL;
+  GString *sql = g_string_new(NULL);
+  struct sqlfs_ms_fk *fk = obj->foreign_ctrt;
+  
+  ALT_CNSRT(sql, schema, table, obj);
+
+  if (fk->disabled)
+    g_string_append(sql, " WITH NOCHECK ");
+  else
+    g_string_append(sql, " WITH CHECK ");
+
+  g_string_append_printf(sql, "ADD CONSTRAINT [%s] FOREIGN KEY ", obj->name);
+  g_string_append_printf(sql, " %s", def);
+  
+  resql = g_strdup(sql->str);
+  g_string_free(sql, TRUE);
+
+  return resql;
+}
+
 char * make_foreign_def(struct sqlfs_ms_obj *obj)
 {
   char *text = NULL;
+  GString *sql = g_string_new(NULL);
+  struct sqlfs_ms_fk *fk = obj->foreign_ctrt;
 
+  if (fk->disabled == TRUE)
+    g_string_append(sql, "WITH NOCHECK ");
+  else
+    g_string_append(sql, "WITH CHECK ");
   
+  g_string_append_printf(sql, "CONSTRAINT [%s] FOREIGN KEY ", obj->name);
+  g_string_append_printf(sql, "(%s) ", fk->columns_def);
+  g_string_append_printf(sql, "REFERENCES %s (%s)", fk->ref_object_def,
+			 fk->ref_columns_def);
+  
+  if (fk->not4repl == TRUE)
+    g_string_append(sql, " NOT FOR REPLICATION");
+
+  g_string_append(sql, "\n");
+  
+  text = g_strdup(sql->str);
+  g_string_free(sql, TRUE);
 
   return text;
 }
@@ -468,7 +524,7 @@ GList * fetch_foreignes(int tid, const char *name, GError **error)
   g_string_append(sql, ", fk.is_not_for_replication");
   g_string_append(sql, ", fk.delete_referential_action");
   g_string_append(sql, ", fk.update_referential_action");
-  g_string_append(sql, ",((SELECT sc_own.name + ', '");
+  g_string_append(sql, ",((SELECT '[' + sc_own.name + '], '");
   g_string_append(sql, "   FROM sys.foreign_key_columns fkc");
   g_string_append(sql, "   INNER JOIN sys.columns sc_own");
   g_string_append(sql, "     ON sc_own.column_id = fkc.parent_column_id");
@@ -476,7 +532,7 @@ GList * fetch_foreignes(int tid, const char *name, GError **error)
   g_string_append(sql, "   WHERE fkc.constraint_object_id = fk.object_id");
   g_string_append(sql, "   FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'))");
 
-  g_string_append(sql, ",((SELECT sc_ref.name + ', '");
+  g_string_append(sql, ",((SELECT '[' + sc_ref.name + '], '");
   g_string_append(sql, "   FROM sys.foreign_key_columns fkc");
   g_string_append(sql, "   INNER JOIN sys.columns sc_ref");
   g_string_append(sql, "     ON sc_ref.column_id = fkc.referenced_column_id");
@@ -537,16 +593,26 @@ GList * fetch_foreignes(int tid, const char *name, GError **error)
 	fk->delact = delact;
 	fk->updact = updact;
 	fk->not4repl = is_not4repl;
-	fk->columns_def = g_strdup(g_strchomp(own_def));
+	fk->disabled = disabled;
+	
+	char *wstr = NULL;
+	if (own_def) {
+	  wstr = g_strchomp(own_def);
+	  fk->columns_def = g_strndup(wstr, strlen(wstr) - 1);
+	}
+	
 	schema_name = g_strchomp(schema_name);
 	ref_name = g_strchomp(ref_name);
 	fk->ref_object_def = g_strconcat("[", schema_name, "].[",
 					 ref_name, "]", NULL);
-	fk->ref_columns_def = g_strdup(g_strchomp(ref_def));
+	if (ref_def) {
+	  wstr = g_strchomp(ref_def);
+	  fk->ref_columns_def = g_strndup(ref_def, strlen(wstr) - 1);
+	}
 
 	obj->foreign_ctrt = fk;
 	obj->foreign_ctrt->def = make_foreign_def(obj);
-	obj->len = 0; //strlen(fk->def);
+	obj->len = strlen(fk->def);
 
 	obj->cached_time = g_get_monotonic_time();
 	reslist = g_list_append(reslist, obj);
@@ -581,18 +647,6 @@ GList * fetch_foreignes(int tid, const char *name, GError **error)
   
 }
 
-#define IDX_PRMS_BOOL(sql, field)		\
-  if (field == TRUE)				\
-    g_string_append(sql, "ON ");		\
-  else						\
-    g_string_append(sql, "OFF ");
-
-#define IDX_PRMS_INT(sql, field)		\
-  g_string_append_printf(sql, "%d ", field);
-
-#define INS_COMMA(sql) g_string_append(sql, ", ");
-
-
 char * create_index_def(const char *schema, const char *table,
 			struct sqlfs_ms_obj *obj, const char *def)
 {
@@ -600,12 +654,8 @@ char * create_index_def(const char *schema, const char *table,
   GString *sql = g_string_new(NULL);
 
   if (obj->type == R_PK || obj->type == R_UQ) {
-    g_string_append_printf(sql, "ALTER TABLE [%s].[%s]", schema, table);
-    if (obj->object_id) {
-      g_string_append_printf(sql, " DROP CONSTRAINT [%s] \n", obj->name);
-      g_string_append_printf(sql, "ALTER TABLE [%s].[%s]", schema, table); 
-    }
-
+    
+    ALT_CNSRT(sql, schema, table, obj);
     g_string_append_printf(sql, " ADD CONSTRAINT [%s] ", obj->name);
 
     if (obj->type == R_PK) {
@@ -744,7 +794,7 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
   g_string_append(sql, "   ON si.object_id = so.object_id");
   g_string_append(sql, " INNER JOIN sys.data_spaces ds");
   g_string_append(sql, "   ON ds.data_space_id = si.data_space_id");
-  g_string_append_printf(sql, " WHERE so.object_id = %d", tid);
+  g_string_append_printf(sql, " WHERE so.object_id = %d AND si.type <> 0", tid);
 
   if (name)
     g_string_append_printf(sql, " AND si.name = '%s'", name);
@@ -801,11 +851,10 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
-	name_buf = trimwhitespace(name_buf);
 	obj = g_try_new0(struct sqlfs_ms_obj, 1);
 	obj->object_id = index_id;
 	obj->parent_id = obj_id;
-	obj->name = g_strdup(name_buf);
+	obj->name = g_strdup(g_strchomp(name_buf));
 	obj->mtime = mdate_buf;
 	obj->ctime = cdate_buf;
 	
@@ -834,9 +883,10 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 	if (has_filter)
 	  idx->filter_def = g_strdup(g_strchomp(filter_def));
 	
-	if (col_def) {
+	if (col_def != NULL) {
 	  wstr = g_strchomp(col_def);
-	  idx->columns_def = g_strndup(wstr, strlen(wstr) - 1);
+	  if (strlen(wstr) > 0)
+	    idx->columns_def = g_strndup(wstr, strlen(wstr) - 1);
 	}
 
 	if (incl_def != NULL) {
@@ -853,7 +903,7 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 				  g_strchomp(table_name), obj);
 	obj->len = strlen(idx->def);
 	obj->cached_time = g_get_monotonic_time();
-
+	g_message("NAME INDEX: %s", obj->name);
 	reslist = g_list_append(reslist, obj);
 	break;
       case BUF_FULL:
