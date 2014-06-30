@@ -903,7 +903,6 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 				  g_strchomp(table_name), obj);
 	obj->len = strlen(idx->def);
 	obj->cached_time = g_get_monotonic_time();
-	g_message("NAME INDEX: %s", obj->name);
 	reslist = g_list_append(reslist, obj);
 	break;
       case BUF_FULL:

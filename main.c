@@ -297,6 +297,36 @@ static int sqlfs_utime(const char *path, struct utimbuf* time)
   return 0;
 }
 
+static int sqlfs_mkdir(const char *path, mode_t mode)
+{
+  int err = 0;
+  
+  if (S_ISDIR(mode))
+    return -EPERM;
+
+  gchar **parent = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
+  if (parent == NULL)
+    err = -EFAULT;
+
+  if (!err && find_object(path, NULL) == NULL) {
+    err = -EEXIST;
+  }
+  else {
+    int level = g_strv_length(parent);
+    if (level == 1) {
+      g_message("CREATE SCHEMA");
+    }
+    else
+      if (level == 2)
+	g_message("CREATE TABLE");
+      else
+	err = -ENOTSUP;
+
+  }
+  
+  return err;
+}
+
 static int sqlfs_mknod(const char *path, mode_t mode, dev_t rdev)
 {
   int err = 0;
@@ -567,6 +597,7 @@ static struct fuse_operations sqlfs_oper = {
   .readdir = sqlfs_readdir,
   .read = sqlfs_read,
   .open = sqlfs_open,
+  .mkdir = sqlfs_mkdir,
   .mknod = sqlfs_mknod,
   .write = sqlfs_write,
   .rename = sqlfs_rename,

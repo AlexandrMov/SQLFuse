@@ -130,7 +130,6 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
   start_checker();
 
   YY_BUFFER_STATE bp;
-  g_message("-- %s -- ", text);
   bp = yy_scan_string(text);
   yy_switch_to_buffer(bp);  
   error = yyparse();
