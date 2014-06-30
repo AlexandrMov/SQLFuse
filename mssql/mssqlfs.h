@@ -208,6 +208,18 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
 			GError **error);
 
 /*
+ * Создать схему с владельцем по умолчанию
+ */
+void create_schema(const char *name, GError **error);
+
+
+/*
+ * Создать таблицу с столбцом идентификатором
+ */
+void create_table(const char *schema, const char *name, GError **error);
+
+
+/*
  * Создать/записать объект
  */
 void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
@@ -230,6 +242,7 @@ void remove_ms_object(const char *schema, const char *parent,
  * Убрать за объектом
  */
 void free_ms_obj(gpointer msobj);
+
 
 /*
  * Закончить работу с контекстом

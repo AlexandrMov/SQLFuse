@@ -85,7 +85,7 @@ CONSTRAINT	{ return CONSTRAINT; }
 
 "--".*$		{ /* skip comment */ }
 
-[A-Za-z][A-Za-z0-9_]*	{ yylval.sval = strdup(yytext); return NAME; }
+[A-Za-z][A-Za-z0-9_.]*	{ yylval.sval = strdup(yytext); return NAME; }
 
 \/\*([^*]|\*[^/])*\*+\/ ; /* skip comment */
 

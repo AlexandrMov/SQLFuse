@@ -120,7 +120,40 @@ struct sqlfs_ms_obj * find_ms_object(const struct sqlfs_ms_obj *parent,
       ctrt->disabled = 0;						\
     else								\
       ctrt->disabled = 1;						\
-  }									
+  }
+
+void create_schema(const char *name, GError **error)
+{
+  GError *terr = NULL;
+  GString *sql = g_string_new(NULL);
+
+  g_string_append_printf(sql, "CREATE SCHEMA [%s]", name);
+  msctx_t *ctx = exec_sql(sql->str, &terr);
+  close_sql(ctx);
+  
+  g_string_free(sql, TRUE);
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+}
+
+void create_table(const char *schema, const char *name, GError **error)
+{
+  GError *terr = NULL;
+  GString *sql = g_string_new(NULL);
+
+  g_string_append_printf(sql, "CREATE TABLE [%s].[%s] ", schema, name);
+  g_string_append_printf(sql, "([id_%s_%s] INT IDENTITY(1,1) NOT NULL)",
+			 schema, name);
+
+  msctx_t *ctx = exec_sql(sql->str, &terr);
+  close_sql(ctx);
+  
+  g_string_free(sql, TRUE);
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+}
   
 void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 		     const char *text, struct sqlfs_ms_obj *obj, GError **err)
@@ -262,15 +295,21 @@ void remove_ms_object(const char *schema, const char *parent,
       break;
     case R_X:
       g_string_append(sql, "INDEX");
+      break;
     default:
       g_set_error(&terr, EENOTSUP, EENOTSUP, NULL);
     }
 
-    g_string_append_printf(sql, " [%s].[%s]", schema, obj->name);
-
-    if (obj->type == R_X) {
-      g_string_append_printf(sql, " ON [%s].[%s]", schema, parent);
+    if (obj->type != D_SCHEMA) {
+      g_string_append_printf(sql, " [%s].[%s]", schema, obj->name);
+      
+      if (obj->type == R_X) {
+	g_string_append_printf(sql, " ON [%s].[%s]", schema, parent);
+      }
+      
     }
+    else
+      g_string_append_printf(sql, " [%s]", obj->name);
   }
   
   if (terr == NULL) {

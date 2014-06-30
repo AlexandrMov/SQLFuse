@@ -308,22 +308,63 @@ static int sqlfs_mkdir(const char *path, mode_t mode)
   if (parent == NULL)
     err = -EFAULT;
 
-  if (!err && find_object(path, NULL) == NULL) {
-    err = -EEXIST;
-  }
-  else {
+  if (!err) {
     int level = g_strv_length(parent);
+    GError *error = NULL;
+    
     if (level == 1) {
-      g_message("CREATE SCHEMA");
+      create_schema(g_path_get_basename(path), &error);
     }
     else
       if (level == 2)
-	g_message("CREATE TABLE");
+	create_table(*parent, g_path_get_basename(path), &error);
       else
 	err = -ENOTSUP;
-
+    
+    if (error != NULL)
+      err = -EFAULT;
+    
   }
   
+  if (g_strv_length(parent) > 0) {
+    g_strfreev(parent);
+  }
+  
+  return err;
+}
+
+static int sqlfs_rmdir(const char *path)
+{
+  int err = 0;
+  
+  gchar **parent = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
+  if (parent == NULL)
+    err = -EFAULT;
+  
+  if (!err) {
+    GError *terr = NULL;
+    int level = g_strv_length(parent);
+    struct sqlfs_ms_obj *object = find_object(path, &terr);
+    if (object == NULL || (!object->object_id && !object->schema_id)) {
+      err = -ENOENT;
+    }
+
+    if (level > 2)
+      err = -EPERM;
+
+    if (!err)
+      remove_ms_object(*parent, *(parent + 1), object, &terr);
+    
+    if (terr != NULL)
+      err = -EFAULT;
+    
+    SAFE_REMOVE_ALL(path);
+  }
+  
+  if (g_strv_length(parent) > 0) {
+    g_strfreev(parent);
+  }
+
   return err;
 }
 
@@ -339,23 +380,18 @@ static int sqlfs_mknod(const char *path, mode_t mode, dev_t rdev)
     err = -EFAULT;
 
   if (!err) {
-    if (find_object(path, NULL) == NULL) {
-      err = -EEXIST;
-    }
-    else {
-      struct sqlfs_ms_obj *tobj = g_try_new0(struct sqlfs_ms_obj, 1);
-      tobj->object_id = 0;
-      tobj->name = g_path_get_basename(path);
-      tobj->type = R_TEMP;
-      
-      g_mutex_lock(&cache.m);
-      g_hash_table_insert(cache.temp_table, g_strdup(path), tobj);
-      g_mutex_unlock(&cache.m);
-      
-      sqlfs_chmod(path, mode);
-      
-      err = 0;
-    }
+    struct sqlfs_ms_obj *tobj = g_try_new0(struct sqlfs_ms_obj, 1);
+    tobj->object_id = 0;
+    tobj->name = g_path_get_basename(path);
+    tobj->type = R_TEMP;
+    
+    g_mutex_lock(&cache.m);
+    g_hash_table_insert(cache.temp_table, g_strdup(path), tobj);
+    g_mutex_unlock(&cache.m);
+    
+    sqlfs_chmod(path, mode);
+    
+    err = 0;
   }
   
   if (g_strv_length(parent) > 0) {
@@ -463,7 +499,6 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
     if (!obj)
       obj->name = g_path_get_basename(path);
 
-
     if (fsfile->flush == TRUE && strlen(fsfile->buffer) > 0) {
       write_ms_object(*schema, pobj, fsfile->buffer, obj, &terr);
       fsfile->flush = FALSE;
@@ -507,7 +542,7 @@ static int sqlfs_unlink(const char *path)
     GError *terr = NULL;
     struct sqlfs_ms_obj *object = find_object(path, &terr);
     if (object != NULL && !object->object_id) {
-	err = -ENOENT;
+      err = -ENOENT;
     }
 
     remove_ms_object(*schema, *(schema + 1), object, &terr);
@@ -605,6 +640,7 @@ static struct fuse_operations sqlfs_oper = {
   .chown = sqlfs_chown,
   .chmod = sqlfs_chmod,
   .unlink = sqlfs_unlink,
+  .rmdir = sqlfs_rmdir,
   .truncate = sqlfs_truncate,
   .flush = sqlfs_flush,
   .release = sqlfs_release,
