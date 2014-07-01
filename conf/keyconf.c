@@ -49,8 +49,17 @@ static void load_from_file(GKeyFile *keyfile, const char *group, GError **error)
   if (g_key_file_has_key(keyfile, group, "from_codeset", &terr))
     sqlctx->from_codeset = g_key_file_get_value(keyfile, group,
 						"from_codeset", &terr);
+  
   if (g_key_file_has_key(keyfile, group, "ansi_npw", &terr))
     sqlctx->ansi_npw = g_key_file_get_boolean(keyfile, group, "ansi_npw", &terr);
+
+  if (g_key_file_has_key(keyfile, group, "default_column", &terr))
+    sqlctx->defcol = g_key_file_get_value(keyfile, group,
+					    "default_column", &terr);
+
+  if (g_key_file_has_key(keyfile, group, "merge_names", &terr))
+    sqlctx->merge_names = g_key_file_get_boolean(keyfile, group,
+						 "merge_names", &terr);
 
   if (g_key_file_has_key(keyfile, group, "auth", &terr))
     sqlctx->auth = g_key_file_get_value(keyfile, group, "auth", &terr);
@@ -86,7 +95,7 @@ void init_keyfile(const char *profile, GError **error)
   if (terr == NULL && g_key_file_has_group(keyfile, profile)) {
     load_from_file(keyfile, profile, &terr);
   }
-
+  
   g_key_file_free(keyfile);
   g_free(curdir);
   
@@ -165,9 +174,11 @@ void close_keyfile()
     if (sqlctx->from_codeset != NULL)
       g_free(sqlctx->from_codeset);
 
-    if (sqlctx->from_codeset != NULL)
+    if (sqlctx->auth != NULL)
       g_free(sqlctx->auth);
-
+    
+    if (sqlctx->defcol != NULL)
+      g_free(sqlctx->defcol);
     
     g_free(sqlctx);
   }
