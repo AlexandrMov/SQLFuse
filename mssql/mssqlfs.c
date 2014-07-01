@@ -331,17 +331,18 @@ void remove_ms_object(const char *schema, const char *parent,
     }
 
     if (obj->type != D_SCHEMA) {
-      g_string_append_printf(sql, " [%s].[%s]", schema, obj->name);
-      
+
       if (obj->type == R_X) {
-	g_string_append_printf(sql, " ON [%s].[%s]", schema, parent);
+	g_string_append_printf(sql, " [%s] ON [%s].[%s]", obj->name, schema, parent);
       }
-      
+      else
+	g_string_append_printf(sql, " [%s].[%s]", schema, obj->name);
+
     }
     else
       g_string_append_printf(sql, " [%s]", obj->name);
   }
-  
+
   if (terr == NULL) {
     msctx_t *ctx = exec_sql(sql->str, &terr);
     close_sql(ctx);

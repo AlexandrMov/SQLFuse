@@ -666,10 +666,11 @@ char * create_index_def(const char *schema, const char *table,
     }
 
   } else {
-    if (obj->object_id)
+    if (!obj->object_id)
       g_string_append(sql, "CREATE ");
     else
       g_string_append(sql, "ALTER ");
+      
     if (obj->index != NULL && obj->index->is_unique)
       g_string_append_printf(sql, "UNIQUE ");
 
@@ -777,9 +778,7 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
   g_string_append(sql, "     AND ic.is_included_column = 0");
   g_string_append(sql, "   FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)') )");
 
-  g_string_append(sql, ",((SELECT sc.name ");
-  g_string_append(sql, " +  CASE ic.is_descending_key WHEN 1 THEN ' DESC'");
-  g_string_append(sql, "     ELSE ' ASC' END + ', '");
+  g_string_append(sql, ",((SELECT sc.name + ', '");
   g_string_append(sql, "   FROM sys.index_columns ic INNER JOIN sys.columns sc");
   g_string_append(sql, "    ON sc.column_id = ic.column_id ");
   g_string_append(sql, "     AND sc.object_id = ic.object_id");
