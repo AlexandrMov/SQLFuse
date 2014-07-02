@@ -487,6 +487,33 @@ char * create_foreign_def(const char *schema, const char *table,
   return resql;
 }
 
+static inline GString * make_fk_action(GString *sql, const char *act_name,
+				       unsigned int action)
+{
+  gchar *act_desc = NULL;
+  
+  switch(action) {
+  case 1:
+    act_desc = "CASCADE";
+    break;
+  case 2:
+    act_desc = "SET NULL";
+    break;
+  case 3:
+    act_desc = "SET DEFAULT";
+    break;
+  default:
+    act_desc = "NO ACTION";
+    break;
+  }
+  
+  g_string_append_printf(sql, " ON %s %s", act_name, act_desc);
+  
+  g_free(act_desc);
+  
+  return sql;
+}
+
 char * make_foreign_def(struct sqlfs_ms_obj *obj)
 {
   char *text = NULL;
@@ -502,6 +529,12 @@ char * make_foreign_def(struct sqlfs_ms_obj *obj)
   g_string_append_printf(sql, "(%s) ", fk->columns_def);
   g_string_append_printf(sql, "REFERENCES %s (%s)", fk->ref_object_def,
 			 fk->ref_columns_def);
+
+  if (fk->updact > 0)
+    sql = make_fk_action(sql, "UPDATE", fk->updact);
+
+  if (fk->delact > 0)
+    sql = make_fk_action(sql, "DELETE", fk->delact);
   
   if (fk->not4repl == TRUE)
     g_string_append(sql, " NOT FOR REPLICATION");
