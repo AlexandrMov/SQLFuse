@@ -578,40 +578,58 @@ static int sqlfs_truncate(const char *path, off_t offset)
 
 static int sqlfs_rename(const char *oldname, const char *newname)
 {
+  gchar **schemaold = g_strsplit(g_path_skip_root(oldname),
+				 G_DIR_SEPARATOR_S, -1);
+  gchar **schemanew = g_strsplit(g_path_skip_root(newname),
+				 G_DIR_SEPARATOR_S, -1);
+  
   int err = 0;
 
-  gchar **schemaold = g_strsplit(g_path_skip_root(oldname), G_DIR_SEPARATOR_S, -1);
-  if (schemaold == NULL)
+  if (g_strv_length(schemanew) == 1)
+    err = -EFAULT;
+  
+  if (g_strv_length(schemaold) != g_strv_length(schemanew))
     err = -EFAULT;
 
-  gchar **schemanew = g_strsplit(g_path_skip_root(newname), G_DIR_SEPARATOR_S, -1);
-  if (schemanew == NULL)
+  if (g_strv_length(schemanew) > 2
+      && g_strcmp0(*(schemanew + 2), *(schemaold + 2)))
     err = -EFAULT;
-
+  
   if (!err) {
     GError *terr = NULL;
+    
     gchar *ppold = g_path_get_dirname(oldname),
       *ppnew = g_path_get_dirname(newname);
-    
+  
     struct sqlfs_ms_obj
       *ppobj_old = find_object(ppold, &terr),
       *obj_old = find_object(oldname, &terr),
-      *ppobj_new = find_object(ppnew, &terr),
       *obj_new = g_try_new0(struct sqlfs_ms_obj, 1);
 
     if (!obj_old)
-      obj_old->name = g_path_get_basename(oldname);
-
-    obj_new->name = g_path_get_basename(newname);
-
-    if (!g_strcmp0(ppold, ppnew))
-      rename_ms_object(*schemanew, ppobj_new, obj_old, obj_new, &terr);
-    else
-      err = -ENOTSUP;
+      err = -ENOENT;
     
-    if (terr != NULL && err == 0)
-      g_hash_table_remove(cache.cache_table, oldname);
+    if (!err) {
+      g_clear_error(&terr);
+      
+      obj_old->name = g_path_get_basename(oldname);
+      obj_new->name = g_path_get_basename(newname);
+  
+      rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,
+		       ppobj_old, &terr);
+      
+      if (terr == NULL)
+	g_hash_table_remove(cache.cache_table, oldname);
+      else
+	err = -EFAULT;
+      
+    }
+
+    free_ms_obj(obj_new);
   }
+  
+  g_strfreev(schemanew);
+  g_strfreev(schemaold);
   
   return err;
 }

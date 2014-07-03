@@ -452,27 +452,70 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
   return def;
 }
 
-void rename_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
+void rename_ms_object(const char *schema_old, const char *schema_new,
 		      struct sqlfs_ms_obj *obj_old, struct sqlfs_ms_obj *obj_new,
-		      GError **error)
+		      struct sqlfs_ms_obj *parent, GError **error)
 {
   GError *terr = NULL;
-  if (obj_old->type == R_COL) {
-    GString *sql = g_string_new(NULL);    
-    g_string_append_printf(sql, "EXEC sp_rename '%s.%s.%s', '%s'",
-			   schema, parent->name,
-			   obj_old->name, obj_new->name);
-    msctx_t *ctx = exec_sql(sql->str, &terr);
-    close_sql(ctx);
+  
+  if (obj_old->type == R_TR && g_str_has_prefix(obj_old->name, "#"))
+    g_set_error(&terr, EENOTSUP, EENOTSUP,
+		"%d: operation not supported\n", __LINE__);
+
+  if (terr == NULL) {
+    GString *sql = g_string_new(NULL);
+
+    //g_string_append(sql, "BEGIN TRANSACTION\n");
+    
+    const gchar *wrksch = schema_old;
+    if (schema_old != NULL && schema_new != NULL
+	&& g_strcmp0(schema_old, schema_new)) {
+
+      switch(obj_old->type) {
+      case D_IT:
+      case D_S:
+      case D_TT:
+      case D_U:
+      case D_V:
+      case R_P:
+      case R_FN:
+      case R_FS:
+      case R_FT:
+	g_string_append_printf(sql, "ALTER SCHEMA [%s] TRANSFER [%s].[%s];\n",
+			       schema_new, schema_old, obj_old->name);
+	wrksch = schema_new;
+	break;
+      default:
+	g_set_error(&terr, EENOTSUP, EENOTSUP,
+		    "%d: operation not supported\n", __LINE__);
+      }
+      
+    }
+
+    if (terr == NULL && g_strcmp0(obj_old->name, obj_new->name)) {
+      switch (obj_old->type) {
+      case R_COL:
+      case R_X:
+	g_string_append_printf(sql, "EXEC sp_rename '[%s].[%s].[%s]', '%s'",
+			       wrksch, parent->name, obj_old->name, obj_new->name);
+	break;
+      default:
+	g_string_append_printf(sql, "EXEC sp_rename '[%s].[%s]', '%s'",
+			       wrksch, obj_old->name, obj_new->name);
+	break;
+      }
+    }
+
+    //g_string_append(sql, "\nCOMMIT TRANSACTION");
+
+    if (terr == NULL) {
+      msctx_t *ctx = exec_sql(sql->str, &terr);
+      close_sql(ctx);
+    }
+    
     g_string_free(sql, TRUE);
   }
-  else {
-    gchar *text = load_help_text(schema, obj_old, &terr);
-    remove_ms_object(schema, parent->name, obj_old, &terr);
-    write_ms_object(schema, parent, text, obj_new, &terr);
-    g_free(text);
-  }
-  
+    
   if (terr != NULL)
     g_propagate_error(error, terr);
 }

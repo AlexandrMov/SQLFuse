@@ -25,7 +25,7 @@ BEGIN
     FROM #T1
     
     DECLARE @varname int;
-    SET @varname = NULL;
+ SET @varname = NULL;
     SELECT a 
     FROM t1 
     WHERE a = @varname;
