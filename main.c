@@ -592,7 +592,7 @@ static int sqlfs_rename(const char *oldname, const char *newname)
     err = -EFAULT;
 
   if (g_strv_length(schemanew) > 2
-      && g_strcmp0(*(schemanew + 2), *(schemaold + 2)))
+      && g_strcmp0(*(schemanew + 1), *(schemaold + 1)))
     err = -EFAULT;
   
   if (!err) {
