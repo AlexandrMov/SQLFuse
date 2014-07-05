@@ -349,18 +349,24 @@ static int sqlfs_rmdir(const char *path)
     GError *terr = NULL;
     int level = g_strv_length(parent);
     struct sqlfs_ms_obj *object = find_object(path, &terr);
-    if (terr != NULL && terr->code == EENOTFOUND) {
-      err = -ENOENT;
+    if (terr != NULL) {
+      if (terr->code == EENOTFOUND) {
+	err = -ENOENT;
+      }
+      else {
+	err = -EFAULT;
+      }
     }
+    else {
+      if (level > 2)
+	err = -EPERM;
 
-    if (level > 2)
-      err = -EPERM;
-
-    if (!err)
-      remove_ms_object(*parent, *(parent + 1), object, &terr);
+      if (!err)
+	remove_ms_object(*parent, *(parent + 1), object, &terr);
     
-    if (terr != NULL)
-      err = -EFAULT;
+      if (terr != NULL)
+	err = -EFAULT;
+    }
     
     SAFE_REMOVE_ALL(path);
   }
@@ -409,9 +415,10 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
 {
   int err = 0;
 
-  struct sqlfs_ms_obj *object = find_object(path, NULL);
-  if (object == NULL) {
-    err = -EIO;
+  GError *terr = NULL;
+  struct sqlfs_ms_obj *object = find_object(path, &terr);
+  if (terr != NULL && terr->code == EENOTFOUND) {
+    err = -ENOENT;
   }
   
   if ((fi->flags & O_ACCMODE) == O_RDONLY) {
@@ -440,7 +447,6 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
 
     char *def = NULL;
     if (object->object_id != 0) {
-      GError *terr = NULL;
       def = load_module_text(*schema, object, &terr);
     }
     else {
@@ -547,17 +553,22 @@ static int sqlfs_unlink(const char *path)
   if (!err) {
     GError *terr = NULL;
     struct sqlfs_ms_obj *object = find_object(path, &terr);
-    if (terr != NULL && terr->code == EENOTFOUND) {
-      g_clear_error(&terr);
-      err = -ENOENT;
+    if (terr != NULL) {
+      if (terr->code == EENOTFOUND) {
+	err = -ENOENT;
+      }
+      else {
+	err = -EFAULT;
+      }
     }
     else {
       remove_ms_object(*schema, *(schema + 1), object, &terr);
       if (terr != NULL)
 	err = -EFAULT;
-      
-      SAFE_REMOVE_ALL(path);
     }
+    
+    SAFE_REMOVE_ALL(path);
+    
   }
 
   if (g_strv_length(schema) > 0) {
