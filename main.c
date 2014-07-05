@@ -201,19 +201,21 @@ static int sqlfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     wrk = fetch_schemas(NULL, &terr);
   } else {
     object = find_object(path, &terr);
-    if (!object || !object->name)
-      return -ENOENT;
-
-    if (object->type == D_SCHEMA) 
-      wrk = fetch_schema_obj(object->schema_id, NULL, &terr);
-    else if (object->type == D_U || object->type == D_V) {
-      wrk = fetch_table_obj(object->schema_id, object->object_id, NULL, &terr);
+    if (terr != NULL && terr->code == EENOTFOUND) {
+      err = -ENOENT;
     }
-    else
-      return -ENOENT;
+    else {
+      if (object->type == D_SCHEMA) 
+	wrk = fetch_schema_obj(object->schema_id, NULL, &terr);
+      else if (object->type == D_U || object->type == D_V) {
+	wrk = fetch_table_obj(object->schema_id, object->object_id, NULL, &terr);
+      }
+      else
+	err = -ENOENT;
+    }
   }
 
-  if (!terr && wrk) {
+  if (!err && terr == NULL && wrk) {
     wrk = g_list_first(wrk);
     gchar * str = NULL;
     while (wrk) {
@@ -250,6 +252,8 @@ static int sqlfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     if (terr != NULL && terr->code == EERES) {
       err = -ECONNABORTED;
     }
+
+  
   
   return err;
 }
@@ -345,7 +349,7 @@ static int sqlfs_rmdir(const char *path)
     GError *terr = NULL;
     int level = g_strv_length(parent);
     struct sqlfs_ms_obj *object = find_object(path, &terr);
-    if (object == NULL || (!object->object_id && !object->schema_id)) {
+    if (terr != NULL && terr->code == EENOTFOUND) {
       err = -ENOENT;
     }
 
@@ -496,8 +500,10 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
     struct sqlfs_ms_obj *pobj = find_object(pp, &terr),
       *obj = find_object(path, &terr);
 
-    if (!obj)
+    if (terr != NULL && terr->code == EENOTFOUND) {
+      g_clear_error(&terr);
       obj->name = g_path_get_basename(path);
+    }
 
     if (fsfile->flush == TRUE && strlen(fsfile->buffer) > 0) {
       write_ms_object(*schema, pobj, fsfile->buffer, obj, &terr);
@@ -541,16 +547,17 @@ static int sqlfs_unlink(const char *path)
   if (!err) {
     GError *terr = NULL;
     struct sqlfs_ms_obj *object = find_object(path, &terr);
-    if (object != NULL && !object->object_id) {
+    if (terr != NULL && terr->code == EENOTFOUND) {
+      g_clear_error(&terr);
       err = -ENOENT;
     }
-
-    remove_ms_object(*schema, *(schema + 1), object, &terr);
-    
-    if (terr != NULL)
-      err = -EFAULT;
-
-    SAFE_REMOVE_ALL(path);
+    else {
+      remove_ms_object(*schema, *(schema + 1), object, &terr);
+      if (terr != NULL)
+	err = -EFAULT;
+      
+      SAFE_REMOVE_ALL(path);
+    }
   }
 
   if (g_strv_length(schema) > 0) {
@@ -606,7 +613,7 @@ static int sqlfs_rename(const char *oldname, const char *newname)
       *obj_old = find_object(oldname, &terr),
       *obj_new = g_try_new0(struct sqlfs_ms_obj, 1);
 
-    if (!obj_old)
+    if (!obj_old || (terr != NULL && terr->code == EENOTFOUND))
       err = -ENOENT;
     
     if (!err) {
