@@ -686,6 +686,67 @@ void free_ms_obj(gpointer msobj)
   struct sqlfs_ms_obj *obj = (struct sqlfs_ms_obj *) msobj;
   
   switch(obj->type) {
+  case R_D:
+    if (obj->clmn_ctrt != NULL) {
+      if (obj->clmn_ctrt->column_name != NULL) {
+	g_free(obj->clmn_ctrt->column_name);
+      }
+
+      if (obj->clmn_ctrt->def != NULL) {
+	g_free(obj->clmn_ctrt->def);
+      }
+      
+      g_free(obj->clmn_ctrt);
+    }
+    break;
+  case R_C:
+    if (obj->clmn_ctrt != NULL) {
+      if (obj->clmn_ctrt->def != NULL) {
+	g_free(obj->clmn_ctrt->def);
+      }
+      
+      g_free(obj->clmn_ctrt);
+    }
+    break;
+  case R_F:
+    if (obj->foreign_ctrt != NULL) {
+      if (obj->foreign_ctrt->columns_def != NULL)
+	g_free(obj->foreign_ctrt->columns_def);
+      
+      if (obj->foreign_ctrt->ref_object_def != NULL)
+	g_free(obj->foreign_ctrt->ref_object_def);
+
+      if (obj->foreign_ctrt->ref_columns_def != NULL)
+	g_free(obj->foreign_ctrt->ref_columns_def);
+
+      if (obj->foreign_ctrt->def != NULL)
+	g_free(obj->foreign_ctrt->def);
+
+      g_free(obj->foreign_ctrt);
+    }
+    break;
+  case R_PK:
+  case R_UQ:
+  case R_X:
+    if (obj->index != NULL) {
+      if (obj->index->filter_def != NULL)
+	g_free(obj->index->filter_def);
+
+      if (obj->index->columns_def != NULL)
+	g_free(obj->index->columns_def);
+
+      if (obj->index->incl_columns_def != NULL)
+	g_free(obj->index->incl_columns_def);
+
+      if (obj->index->data_space != NULL)
+	g_free(obj->index->data_space);
+
+      if (obj->index->def != NULL)
+	g_free(obj->index->def);
+      
+      g_free(obj->index);
+    }
+    break;
   case R_P:
   case D_V:
   case R_FN:

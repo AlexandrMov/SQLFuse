@@ -578,7 +578,7 @@ static int sqlfs_truncate(const char *path, off_t offset)
       err = sqlfs_mknod(path, 07777 | S_IFREG, 0);
   }
   else
-    err = -EPERM;
+    err = -ENOTSUP;
   
   return err;
 }
@@ -593,14 +593,14 @@ static int sqlfs_rename(const char *oldname, const char *newname)
   int err = 0;
 
   if (g_strv_length(schemanew) == 1)
-    err = -EFAULT;
+    err = -ENOTSUP;
   
   if (g_strv_length(schemaold) != g_strv_length(schemanew))
-    err = -EFAULT;
+    err = -ENOTSUP;
 
   if (g_strv_length(schemanew) > 2
       && g_strcmp0(*(schemanew + 1), *(schemaold + 1)))
-    err = -EFAULT;
+    err = -ENOTSUP;
   
   if (!err) {
     GError *terr = NULL;
@@ -613,7 +613,7 @@ static int sqlfs_rename(const char *oldname, const char *newname)
       *obj_old = find_object(oldname, &terr),
       *obj_new = g_try_new0(struct sqlfs_ms_obj, 1);
 
-    if (!obj_old || (terr != NULL && terr->code == EENOTFOUND))
+    if (terr != NULL && terr->code == EENOTFOUND)
       err = -ENOENT;
     
     if (!err) {
