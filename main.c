@@ -180,6 +180,9 @@ static int sqlfs_getattr(const char *path, struct stat *stbuf)
       stbuf->st_ino = object->object_id;
       
     }
+
+    if (terr != NULL)
+      g_error_free(terr);
   }
 
   return err;
@@ -253,7 +256,8 @@ static int sqlfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
       err = -ECONNABORTED;
     }
 
-  
+  if (terr != NULL)
+    g_error_free(terr);
   
   return err;
 }
@@ -327,7 +331,9 @@ static int sqlfs_mkdir(const char *path, mode_t mode)
     
     if (error != NULL)
       err = -EFAULT;
-    
+
+    if (error != NULL)
+      g_error_free(error);
   }
   
   if (g_strv_length(parent) > 0) {
@@ -367,6 +373,9 @@ static int sqlfs_rmdir(const char *path)
       if (terr != NULL)
 	err = -EFAULT;
     }
+
+    if (terr != NULL)
+      g_error_free(terr);
     
     SAFE_REMOVE_ALL(path);
   }
@@ -465,6 +474,9 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
 
     g_strfreev(schema);
   }
+
+  if (terr != NULL)
+    g_error_free(terr);
   
   return err;
 }
@@ -518,6 +530,9 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
 
     if (terr != NULL)
       err = -EFAULT;
+
+    if (terr != NULL)
+      g_error_free(terr);
     
     g_free(pp);
   }
@@ -568,6 +583,9 @@ static int sqlfs_unlink(const char *path)
     }
     
     SAFE_REMOVE_ALL(path);
+
+    if (terr != NULL)
+      g_error_free(terr);
     
   }
 
@@ -643,6 +661,9 @@ static int sqlfs_rename(const char *oldname, const char *newname)
       
     }
 
+    if (terr != NULL)
+      g_error_free(terr);
+    
     free_ms_obj(obj_new);
   }
   
@@ -693,7 +714,7 @@ static int sqlfs_fuse_main(struct fuse_args *args)
 
 int main (int argc, char **argv)
 {
-  int res;
+  int res = 0;
   struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
   struct sqlprofile *profile = g_try_new0(struct sqlprofile, 1);
   g_mutex_init(&cache.m);
@@ -705,33 +726,52 @@ int main (int argc, char **argv)
 					   g_free, free_sqlfs_file);
 
   if (fuse_opt_parse(&args, profile, sqlfs_opts, sqlfs_opt_proc) == -1)
-    exit(1);
+    res = 1;
+
+  if (!res) {
+    GError *terr = NULL;
     
-  GError *terr = NULL;
+    init_keyfile(profile->profile, &terr);
+    if (terr != NULL)
+      res = 1;
+    
+    if (!res) {
+      init_msctx(&terr);
+      
+      if (terr != NULL)
+	res = 2;
+    }
 
-  init_keyfile(profile->profile, &terr);
-  if (terr != NULL)
-    exit(1);
-  
-  init_msctx(&terr);
-  if (terr != NULL) {
-    exit(1);
+    if (profile != NULL) {
+      if (profile->profile != NULL)
+	g_free(profile->profile);
+
+      g_free(profile);
+    }
+
+    if (!res) {
+      res = sqlfs_fuse_main(&args);
+      fuse_opt_free_args(&args);
+
+      if (terr != NULL)
+	res = 3;
+    }
+
+    if (!res || res > 2)
+      close_msctx(&terr);
+
+    if (!res || res > 1)
+      close_keyfile();
+
+    if (terr != NULL)
+      g_error_free(terr);
   }
-  
-  g_free(profile->profile);
-  g_free(profile);
-  
-  res = sqlfs_fuse_main(&args);
-  fuse_opt_free_args(&args);
 
-  close_msctx(&terr);
+  g_hash_table_destroy(cache.cache_table);
+  g_hash_table_destroy(cache.temp_table);
+  g_hash_table_destroy(cache.open_table);
+  
   g_mutex_clear(&cache.m);
-
-  close_keyfile();
-  
-  if (terr != NULL) {
-    exit(2);
-  }
   
   return res;
 }

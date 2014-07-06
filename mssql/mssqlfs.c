@@ -275,7 +275,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
     g_free(wrktext);
   }
   else {
-    g_set_error(&terr, EEPARSE, EEPARSE, NULL);
+    g_set_error(&terr, EEPARSE, EEPARSE, "Parse error");
   }
 
   yy_flush_buffer(bp);
@@ -327,7 +327,7 @@ void remove_ms_object(const char *schema, const char *parent,
       g_string_append(sql, "INDEX");
       break;
     default:
-      g_set_error(&terr, EENOTSUP, EENOTSUP, NULL);
+      g_set_error(&terr, EENOTSUP, EENOTSUP, "Module is not support");
     }
 
     if (obj->type != D_SCHEMA) {
@@ -465,8 +465,6 @@ void rename_ms_object(const char *schema_old, const char *schema_new,
   if (terr == NULL) {
     GString *sql = g_string_new(NULL);
 
-    //g_string_append(sql, "BEGIN TRANSACTION\n");
-    
     const gchar *wrksch = schema_old;
     if (schema_old != NULL && schema_new != NULL
 	&& g_strcmp0(schema_old, schema_new)) {
@@ -505,8 +503,6 @@ void rename_ms_object(const char *schema_old, const char *schema_new,
 	break;
       }
     }
-
-    //g_string_append(sql, "\nCOMMIT TRANSACTION");
 
     if (terr == NULL) {
       msctx_t *ctx = exec_sql(sql->str, &terr);
