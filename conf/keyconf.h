@@ -28,7 +28,9 @@ typedef struct {
   char *username, *password;
   char *from_codeset, *to_codeset;
 
-  gboolean ansi_npw;
+  gboolean ansi_npw, merge_names;
+
+  char *defcol;
   
   int maxconn, debug;
 } sqlctx_t;

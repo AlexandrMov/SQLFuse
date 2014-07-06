@@ -60,10 +60,10 @@
 %token<ival> IDENTITY MAX FOR WITH_CHECK
 %token<ival> ONX NOT_FOR_REPLICATION COLUMN NOT WITH_NOCHECK
 %token<ival> PROCEDURE PROC DEFAULT CHECK WITH APPROXNUM
-%token<ival> FOREIGN_KEY REFERENCES PRIMARY_KEY
+%token<ival> FOREIGN_KEY PRIMARY_KEY
 
 %type<nodeobj> index_def obj_name data_type clust_idx_def
-%type<ival> mk_def
+%type<ival> mk_def check_def
 %type<sval> var_def
 
 %start input
@@ -72,11 +72,11 @@
 input: column_def
         | proc_def
 	| func_def
-	| constraint_def index_def
+	| index_def
 {
-	put_node(INDEX, $2.schema, $2.objname,
-		 @2.first_column, @2.first_line,
-	      	 @2.last_column, @2.last_line);
+	put_node(INDEX, $1.schema, $1.objname,
+		 @1.first_column, @1.first_line,
+	      	 @1.last_column, @1.last_line);
 	YYACCEPT;
 }
 	| trg_def
@@ -85,15 +85,14 @@ input: column_def
 	| type_def
 	| constraint_def default_def
 	| with_check_def
-	| constraint_def foreign_def
 	| constraint_def primary_def
+	| constraint_def unique_def
 ;
 
-constraint_def: %empty
-	| CONSTRAINT var_def
+constraint_def: CONSTRAINT var_def
 ;
 
-primary_def: PRIMARY_KEY
+primary_def: PRIMARY_KEY 
 {
 	put_node(PRIMARY_KEY, NULL, NULL,
 		 @1.first_column, @1.first_line,
@@ -101,12 +100,11 @@ primary_def: PRIMARY_KEY
 	YYACCEPT;
 }
 
-foreign_def: FOREIGN_KEY '(' var_def ')'
-	     REFERENCES obj_name '(' var_def ')'
+unique_def: UNIQUE NONCLUSTERED
 {
-	put_node(FOREIGN_KEY, NULL, $3,
-		 @3.first_column, @3.first_line,
-		 @3.last_column, @3.last_line);
+	put_node(UNIQUE, NULL, NULL,
+		 @2.first_column, @2.first_line,
+		 @2.last_column, @2.last_column);
 	YYACCEPT;
 }
 ;
@@ -200,25 +198,34 @@ mk_def: CREATE
 check_def: constraint_def CHECK
 {
 	@$ = @2;
+	$$ = CHECK;
+}
+	| constraint_def FOREIGN_KEY
+{
+	@$ = @2;
+	$$ = FOREIGN_KEY;
 }
 ;
 
 with_check_def: check_def
+{
+	put_check(WITH_CHECK, $1, @1.first_column, @1.first_line,
+	      	  @1.last_column, @1.last_line);
+	YYACCEPT;
+}
 	| WITH_CHECK check_def
 {
-	put_check(WITH_CHECK, @2.first_column, @2.first_line,
+	put_check(WITH_CHECK, $2, @2.first_column, @2.first_line,
 	      	  @2.last_column, @2.last_line);
 	YYACCEPT;
 }
 	| WITH_NOCHECK check_def
 {
-	put_check(WITH_NOCHECK, @2.first_column, @2.first_line,
+	put_check(WITH_NOCHECK, $2, @2.first_column, @2.first_line,
 	      	  @2.last_column, @2.last_line);
 	YYACCEPT;
 }
-
 ;
-
 
 default_def: DEFAULT const_expr FOR obj_name
 {

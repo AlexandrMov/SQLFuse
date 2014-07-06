@@ -180,6 +180,9 @@ static int sqlfs_getattr(const char *path, struct stat *stbuf)
       stbuf->st_ino = object->object_id;
       
     }
+
+    if (terr != NULL)
+      g_error_free(terr);
   }
 
   return err;
@@ -201,19 +204,21 @@ static int sqlfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     wrk = fetch_schemas(NULL, &terr);
   } else {
     object = find_object(path, &terr);
-    if (!object || !object->name)
-      return -ENOENT;
-
-    if (object->type == D_SCHEMA) 
-      wrk = fetch_schema_obj(object->schema_id, NULL, &terr);
-    else if (object->type == D_U || object->type == D_V) {
-      wrk = fetch_table_obj(object->schema_id, object->object_id, NULL, &terr);
+    if (terr != NULL && terr->code == EENOTFOUND) {
+      err = -ENOENT;
     }
-    else
-      return -ENOENT;
+    else {
+      if (object->type == D_SCHEMA) 
+	wrk = fetch_schema_obj(object->schema_id, NULL, &terr);
+      else if (object->type == D_U || object->type == D_V) {
+	wrk = fetch_table_obj(object->schema_id, object->object_id, NULL, &terr);
+      }
+      else
+	err = -ENOENT;
+    }
   }
 
-  if (!terr && wrk) {
+  if (!err && terr == NULL && wrk) {
     wrk = g_list_first(wrk);
     gchar * str = NULL;
     while (wrk) {
@@ -250,6 +255,9 @@ static int sqlfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     if (terr != NULL && terr->code == EERES) {
       err = -ECONNABORTED;
     }
+
+  if (terr != NULL)
+    g_error_free(terr);
   
   return err;
 }
@@ -297,6 +305,88 @@ static int sqlfs_utime(const char *path, struct utimbuf* time)
   return 0;
 }
 
+static int sqlfs_mkdir(const char *path, mode_t mode)
+{
+  int err = 0;
+  
+  if (S_ISDIR(mode))
+    return -EPERM;
+
+  gchar **parent = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
+  if (parent == NULL)
+    err = -EFAULT;
+
+  if (!err) {
+    int level = g_strv_length(parent);
+    GError *error = NULL;
+    
+    if (level == 1) {
+      create_schema(g_path_get_basename(path), &error);
+    }
+    else
+      if (level == 2)
+	create_table(*parent, g_path_get_basename(path), &error);
+      else
+	err = -ENOTSUP;
+    
+    if (error != NULL)
+      err = -EFAULT;
+
+    if (error != NULL)
+      g_error_free(error);
+  }
+  
+  if (g_strv_length(parent) > 0) {
+    g_strfreev(parent);
+  }
+  
+  return err;
+}
+
+static int sqlfs_rmdir(const char *path)
+{
+  int err = 0;
+  
+  gchar **parent = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
+  if (parent == NULL)
+    err = -EFAULT;
+  
+  if (!err) {
+    GError *terr = NULL;
+    int level = g_strv_length(parent);
+    struct sqlfs_ms_obj *object = find_object(path, &terr);
+    if (terr != NULL) {
+      if (terr->code == EENOTFOUND) {
+	err = -ENOENT;
+      }
+      else {
+	err = -EFAULT;
+      }
+    }
+    else {
+      if (level > 2)
+	err = -EPERM;
+
+      if (!err)
+	remove_ms_object(*parent, *(parent + 1), object, &terr);
+    
+      if (terr != NULL)
+	err = -EFAULT;
+    }
+
+    if (terr != NULL)
+      g_error_free(terr);
+    
+    SAFE_REMOVE_ALL(path);
+  }
+  
+  if (g_strv_length(parent) > 0) {
+    g_strfreev(parent);
+  }
+
+  return err;
+}
+
 static int sqlfs_mknod(const char *path, mode_t mode, dev_t rdev)
 {
   int err = 0;
@@ -309,23 +399,18 @@ static int sqlfs_mknod(const char *path, mode_t mode, dev_t rdev)
     err = -EFAULT;
 
   if (!err) {
-    if (find_object(path, NULL) == NULL) {
-      err = -EEXIST;
-    }
-    else {
-      struct sqlfs_ms_obj *tobj = g_try_new0(struct sqlfs_ms_obj, 1);
-      tobj->object_id = 0;
-      tobj->name = g_path_get_basename(path);
-      tobj->type = R_TEMP;
-      
-      g_mutex_lock(&cache.m);
-      g_hash_table_insert(cache.temp_table, g_strdup(path), tobj);
-      g_mutex_unlock(&cache.m);
-      
-      sqlfs_chmod(path, mode);
-      
-      err = 0;
-    }
+    struct sqlfs_ms_obj *tobj = g_try_new0(struct sqlfs_ms_obj, 1);
+    tobj->object_id = 0;
+    tobj->name = g_path_get_basename(path);
+    tobj->type = R_TEMP;
+    
+    g_mutex_lock(&cache.m);
+    g_hash_table_insert(cache.temp_table, g_strdup(path), tobj);
+    g_mutex_unlock(&cache.m);
+    
+    sqlfs_chmod(path, mode);
+    
+    err = 0;
   }
   
   if (g_strv_length(parent) > 0) {
@@ -339,9 +424,10 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
 {
   int err = 0;
 
-  struct sqlfs_ms_obj *object = find_object(path, NULL);
-  if (object == NULL) {
-    err = -EIO;
+  GError *terr = NULL;
+  struct sqlfs_ms_obj *object = find_object(path, &terr);
+  if (terr != NULL && terr->code == EENOTFOUND) {
+    err = -ENOENT;
   }
   
   if ((fi->flags & O_ACCMODE) == O_RDONLY) {
@@ -370,7 +456,6 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
 
     char *def = NULL;
     if (object->object_id != 0) {
-      GError *terr = NULL;
       def = load_module_text(*schema, object, &terr);
     }
     else {
@@ -389,6 +474,9 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
 
     g_strfreev(schema);
   }
+
+  if (terr != NULL)
+    g_error_free(terr);
   
   return err;
 }
@@ -430,9 +518,10 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
     struct sqlfs_ms_obj *pobj = find_object(pp, &terr),
       *obj = find_object(path, &terr);
 
-    if (!obj)
+    if (terr != NULL && terr->code == EENOTFOUND) {
+      g_clear_error(&terr);
       obj->name = g_path_get_basename(path);
-
+    }
 
     if (fsfile->flush == TRUE && strlen(fsfile->buffer) > 0) {
       write_ms_object(*schema, pobj, fsfile->buffer, obj, &terr);
@@ -441,6 +530,9 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
 
     if (terr != NULL)
       err = -EFAULT;
+
+    if (terr != NULL)
+      g_error_free(terr);
     
     g_free(pp);
   }
@@ -476,16 +568,25 @@ static int sqlfs_unlink(const char *path)
   if (!err) {
     GError *terr = NULL;
     struct sqlfs_ms_obj *object = find_object(path, &terr);
-    if (object != NULL && !object->object_id) {
+    if (terr != NULL) {
+      if (terr->code == EENOTFOUND) {
 	err = -ENOENT;
+      }
+      else {
+	err = -EFAULT;
+      }
     }
-
-    remove_ms_object(*schema, *(schema + 1), object, &terr);
+    else {
+      remove_ms_object(*schema, *(schema + 1), object, &terr);
+      if (terr != NULL)
+	err = -EFAULT;
+    }
     
-    if (terr != NULL)
-      err = -EFAULT;
-
     SAFE_REMOVE_ALL(path);
+
+    if (terr != NULL)
+      g_error_free(terr);
+    
   }
 
   if (g_strv_length(schema) > 0) {
@@ -506,47 +607,68 @@ static int sqlfs_truncate(const char *path, off_t offset)
       err = sqlfs_mknod(path, 07777 | S_IFREG, 0);
   }
   else
-    err = -EPERM;
+    err = -ENOTSUP;
   
   return err;
 }
 
 static int sqlfs_rename(const char *oldname, const char *newname)
 {
+  gchar **schemaold = g_strsplit(g_path_skip_root(oldname),
+				 G_DIR_SEPARATOR_S, -1);
+  gchar **schemanew = g_strsplit(g_path_skip_root(newname),
+				 G_DIR_SEPARATOR_S, -1);
+  
   int err = 0;
 
-  gchar **schemaold = g_strsplit(g_path_skip_root(oldname), G_DIR_SEPARATOR_S, -1);
-  if (schemaold == NULL)
-    err = -EFAULT;
+  if (g_strv_length(schemanew) == 1)
+    err = -ENOTSUP;
+  
+  if (g_strv_length(schemaold) != g_strv_length(schemanew))
+    err = -ENOTSUP;
 
-  gchar **schemanew = g_strsplit(g_path_skip_root(newname), G_DIR_SEPARATOR_S, -1);
-  if (schemanew == NULL)
-    err = -EFAULT;
-
+  if (g_strv_length(schemanew) > 2
+      && g_strcmp0(*(schemanew + 1), *(schemaold + 1)))
+    err = -ENOTSUP;
+  
   if (!err) {
     GError *terr = NULL;
+    
     gchar *ppold = g_path_get_dirname(oldname),
       *ppnew = g_path_get_dirname(newname);
-    
+  
     struct sqlfs_ms_obj
       *ppobj_old = find_object(ppold, &terr),
       *obj_old = find_object(oldname, &terr),
-      *ppobj_new = find_object(ppnew, &terr),
       *obj_new = g_try_new0(struct sqlfs_ms_obj, 1);
 
-    if (!obj_old)
-      obj_old->name = g_path_get_basename(oldname);
-
-    obj_new->name = g_path_get_basename(newname);
-
-    if (!g_strcmp0(ppold, ppnew))
-      rename_ms_object(*schemanew, ppobj_new, obj_old, obj_new, &terr);
-    else
-      err = -ENOTSUP;
+    if (terr != NULL && terr->code == EENOTFOUND)
+      err = -ENOENT;
     
-    if (terr != NULL && err == 0)
-      g_hash_table_remove(cache.cache_table, oldname);
+    if (!err) {
+      g_clear_error(&terr);
+      
+      obj_old->name = g_path_get_basename(oldname);
+      obj_new->name = g_path_get_basename(newname);
+  
+      rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,
+		       ppobj_old, &terr);
+      
+      if (terr == NULL)
+	g_hash_table_remove(cache.cache_table, oldname);
+      else
+	err = -EFAULT;
+      
+    }
+
+    if (terr != NULL)
+      g_error_free(terr);
+    
+    free_ms_obj(obj_new);
   }
+  
+  g_strfreev(schemanew);
+  g_strfreev(schemaold);
   
   return err;
 }
@@ -567,6 +689,7 @@ static struct fuse_operations sqlfs_oper = {
   .readdir = sqlfs_readdir,
   .read = sqlfs_read,
   .open = sqlfs_open,
+  .mkdir = sqlfs_mkdir,
   .mknod = sqlfs_mknod,
   .write = sqlfs_write,
   .rename = sqlfs_rename,
@@ -574,6 +697,7 @@ static struct fuse_operations sqlfs_oper = {
   .chown = sqlfs_chown,
   .chmod = sqlfs_chmod,
   .unlink = sqlfs_unlink,
+  .rmdir = sqlfs_rmdir,
   .truncate = sqlfs_truncate,
   .flush = sqlfs_flush,
   .release = sqlfs_release,
@@ -590,7 +714,7 @@ static int sqlfs_fuse_main(struct fuse_args *args)
 
 int main (int argc, char **argv)
 {
-  int res;
+  int res = 0;
   struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
   struct sqlprofile *profile = g_try_new0(struct sqlprofile, 1);
   g_mutex_init(&cache.m);
@@ -602,33 +726,52 @@ int main (int argc, char **argv)
 					   g_free, free_sqlfs_file);
 
   if (fuse_opt_parse(&args, profile, sqlfs_opts, sqlfs_opt_proc) == -1)
-    exit(1);
+    res = 1;
+
+  if (!res) {
+    GError *terr = NULL;
     
-  GError *terr = NULL;
+    init_keyfile(profile->profile, &terr);
+    if (terr != NULL)
+      res = 1;
+    
+    if (!res) {
+      init_msctx(&terr);
+      
+      if (terr != NULL)
+	res = 2;
+    }
 
-  init_keyfile(profile->profile, &terr);
-  if (terr != NULL)
-    exit(1);
-  
-  init_msctx(&terr);
-  if (terr != NULL) {
-    exit(1);
+    if (profile != NULL) {
+      if (profile->profile != NULL)
+	g_free(profile->profile);
+
+      g_free(profile);
+    }
+
+    if (!res) {
+      res = sqlfs_fuse_main(&args);
+      fuse_opt_free_args(&args);
+
+      if (terr != NULL)
+	res = 3;
+    }
+
+    if (!res || res > 2)
+      close_msctx(&terr);
+
+    if (!res || res > 1)
+      close_keyfile();
+
+    if (terr != NULL)
+      g_error_free(terr);
   }
-  
-  g_free(profile->profile);
-  g_free(profile);
-  
-  res = sqlfs_fuse_main(&args);
-  fuse_opt_free_args(&args);
 
-  close_msctx(&terr);
+  g_hash_table_destroy(cache.cache_table);
+  g_hash_table_destroy(cache.temp_table);
+  g_hash_table_destroy(cache.open_table);
+  
   g_mutex_clear(&cache.m);
-
-  close_keyfile();
-  
-  if (terr != NULL) {
-    exit(2);
-  }
   
   return res;
 }

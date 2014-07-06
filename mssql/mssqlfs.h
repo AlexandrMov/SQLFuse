@@ -123,8 +123,14 @@ struct sqlfs_ms_module {
 };
 
 struct sqlfs_ms_fk {
-  int delact;
-  int updact;
+  int delact, updact;
+  int not4repl, disabled;
+
+  char *columns_def;
+  char *ref_object_def;
+  char *ref_columns_def;
+
+  char *def;
 };
 
 struct sqlfs_ms_index {
@@ -140,6 +146,9 @@ struct sqlfs_ms_index {
   char *filter_def;
   char *columns_def;
   char *incl_columns_def;
+  char *data_space;
+
+  char *def;
 };
 
 struct sqlfs_ms_obj {
@@ -199,6 +208,18 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
 			GError **error);
 
 /*
+ * Создать схему с владельцем по умолчанию
+ */
+void create_schema(const char *name, GError **error);
+
+
+/*
+ * Создать таблицу с столбцом идентификатором
+ */
+void create_table(const char *schema, const char *name, GError **error);
+
+
+/*
  * Создать/записать объект
  */
 void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
@@ -207,9 +228,9 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 /*
  * Переименовать/переместить объект
  */
-void rename_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
+void rename_ms_object(const char *schema_old, const char *schema_new,
 		      struct sqlfs_ms_obj *obj_old, struct sqlfs_ms_obj *obj_new,
-		      GError **error);
+		      struct sqlfs_ms_obj *parent, GError **error);
 
 /*
  * Удалить объект
@@ -221,6 +242,7 @@ void remove_ms_object(const char *schema, const char *parent,
  * Убрать за объектом
  */
 void free_ms_obj(gpointer msobj);
+
 
 /*
  * Закончить работу с контекстом

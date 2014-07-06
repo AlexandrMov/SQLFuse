@@ -68,7 +68,6 @@ DEFAULT		{ return DEFAULT; }
 CHECK		{ return CHECK; }
 WITH		{ return WITH; }
 CONSTRAINT	{ return CONSTRAINT; }
-REFERENCES	{ return REFERENCES; }
 
 [0-9]+ 		|
 [0-9]+"."[0-9]*	|
@@ -79,11 +78,17 @@ REFERENCES	{ return REFERENCES; }
 "."[0-9]*[eE][+-]?[0-9]+		{ return APPROXNUM; }
 
 '[^'\n]*'	{ yylval.sval = strdup(yytext); return STRING; }
-\[|\]|[-+*/(),.;]	return yytext[0];
+
+\[	|
+\]	|
+[-+*/(),.;]	{ return yytext[0]; }
+
 "--".*$		{ /* skip comment */ }
-[A-Za-z][A-Za-z0-9_]*  	|
-\[[A-Za-z][^\n'"@]*\]		{ yylval.sval = strdup(yytext); return NAME; }
+
+[A-Za-z][A-Za-z0-9_.]*	{ yylval.sval = strdup(yytext); return NAME; }
+
 \/\*([^*]|\*[^/])*\*+\/ ; /* skip comment */
+
 '[^'\n]*$		{ yyerror("Unterminated string"); }
 \n		       	{ /* skip newline */ }
 [ \t\r]+	       	; /* skip whitespaces */
@@ -93,5 +98,6 @@ REFERENCES	{ return REFERENCES; }
 void
 yyerror(char *s)
 {
-	printf("== FLEX: %s at %s\n", s, yytext);
+	printf("== FLEX: %s at %s: %d\n", s, yytext, yycolumn);
+	reset_column();
 }

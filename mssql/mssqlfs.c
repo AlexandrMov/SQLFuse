@@ -113,6 +113,78 @@ struct sqlfs_ms_obj * find_ms_object(const struct sqlfs_ms_obj *parent,
   return result;
 }
 
+#define CHECK_NODE(node, ctrt, def)					\
+  if (node != NULL) {							\
+    ctrt = g_try_new0(def, 1);						\
+    if (node->check == WITH_CHECK)					\
+      ctrt->disabled = 0;						\
+    else								\
+      ctrt->disabled = 1;						\
+  }
+
+void create_schema(const char *name, GError **error)
+{
+  GError *terr = NULL;
+  GString *sql = g_string_new(NULL);
+
+  g_string_append_printf(sql, "CREATE SCHEMA [%s]", name);
+  msctx_t *ctx = exec_sql(sql->str, &terr);
+  close_sql(ctx);
+  
+  g_string_free(sql, TRUE);
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+}
+
+void create_table(const char *schema, const char *name, GError **error)
+{
+  GError *terr = NULL;
+  GString *sql = g_string_new(NULL);
+
+  g_string_append_printf(sql, "CREATE TABLE [%s].[%s] ", schema, name);
+  sqlctx_t *sqlctx = fetch_context(FALSE, &terr);
+  if (sqlctx->defcol != NULL) {
+    GRegex *regex;
+    gchar *defcol = NULL;
+    if (!g_strcmp0(schema, name) && sqlctx->merge_names == TRUE) {
+      regex = g_regex_new("%schema\\S*%table", 0, 0, &terr);
+      defcol = g_regex_replace(regex, sqlctx->defcol, strlen(sqlctx->defcol),
+			       0, schema, 0, &terr);
+      g_regex_unref(regex);
+    }
+    else {
+      gchar *sch_rep = NULL;
+      regex = g_regex_new("%schema", 0, 0, &terr);
+      sch_rep = g_regex_replace(regex, sqlctx->defcol, strlen(sqlctx->defcol),
+				0, schema, 0, &terr);
+      g_regex_unref(regex);
+      
+      regex = g_regex_new("%table", 0, 0, &terr);
+      defcol = g_regex_replace(regex, sch_rep, strlen(sch_rep),
+			       0, name, 0, &terr);
+      g_regex_unref(regex);
+
+      g_free(sch_rep);
+    }
+
+    g_string_append_printf(sql, "(%s)", defcol);
+    
+    g_free(defcol);
+  }
+  else {
+    g_string_append_printf(sql, "([id] INT IDENTITY(1,1) NOT NULL)");
+  }
+
+  msctx_t *ctx = exec_sql(sql->str, &terr);
+  close_sql(ctx);
+  
+  g_string_free(sql, TRUE);
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+}
+  
 void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 		     const char *text, struct sqlfs_ms_obj *obj, GError **err)
 {
@@ -138,13 +210,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       break;
     case CHECK:
       obj->type = R_C;
-      if (node->check_node != NULL) {
-	obj->clmn_ctrt = g_try_new0(struct sqlfs_ms_constraint, 1);
-	if (node->check_node->check == WITH_CHECK)
-	  obj->clmn_ctrt->disabled = 0;
-	else
-	  obj->clmn_ctrt->disabled = 1;
-      }
+      CHECK_NODE(node->check_node, obj->clmn_ctrt, struct sqlfs_ms_constraint);
       wrktext = create_constr_def(schema, parent->name, obj,
 				  text + node->last_column);
       break;
@@ -152,6 +218,28 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       obj->type = R_D;
       wrktext = create_constr_def(schema, parent->name, obj,
 				  text + node->first_column - 1);
+      break;
+    case PRIMARY_KEY:
+
+      obj->type = R_PK;
+      wrktext = create_index_def(schema, parent->name, obj,
+				 text + node->last_column);
+      break;
+    case FOREIGN_KEY:
+      obj->type = R_F;
+      CHECK_NODE(node->check_node, obj->foreign_ctrt, struct sqlfs_ms_fk);
+      wrktext = create_foreign_def(schema, parent->name, obj,
+				   text + node->last_column);
+      break;
+    case UNIQUE:
+      obj->type = R_UQ;
+      wrktext = create_index_def(schema, parent->name, obj,
+				 text + node->last_column);
+      break;
+    case INDEX:
+      obj->type = R_X;
+      wrktext = create_index_def(schema, parent->name, obj,
+				 text + node->last_column);
       break;
     case PROC:
     case FUNCTION:
@@ -187,7 +275,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
     g_free(wrktext);
   }
   else {
-    g_set_error(&terr, EEPARSE, EEPARSE, NULL);
+    g_set_error(&terr, EEPARSE, EEPARSE, "Parse error");
   }
 
   yy_flush_buffer(bp);
@@ -207,7 +295,8 @@ void remove_ms_object(const char *schema, const char *parent,
     g_string_append_printf(sql, "ALTER TABLE [%s].[%s] DROP COLUMN [%s]",
 			   schema, parent, obj->name);
   }
-  else if (obj->type == R_C || obj->type == R_D) {
+  else if (obj->type == R_C || obj->type == R_D || obj->type == R_F
+	   || obj->type == R_PK || obj->type == R_UQ) {
     g_string_append_printf(sql, "ALTER TABLE [%s].[%s] DROP CONSTRAINT [%s]",
 			   schema, parent, obj->name);
   }
@@ -234,13 +323,26 @@ void remove_ms_object(const char *schema, const char *parent,
     case R_TR:
       g_string_append(sql, "TRIGGER");
       break;
+    case R_X:
+      g_string_append(sql, "INDEX");
+      break;
     default:
-      g_set_error(&terr, EENOTSUP, EENOTSUP, NULL);
+      g_set_error(&terr, EENOTSUP, EENOTSUP, "Module is not support");
     }
 
-    g_string_append_printf(sql, " [%s].[%s]", schema, obj->name);
+    if (obj->type != D_SCHEMA) {
+
+      if (obj->type == R_X) {
+	g_string_append_printf(sql, " [%s] ON [%s].[%s]", obj->name, schema, parent);
+      }
+      else
+	g_string_append_printf(sql, " [%s].[%s]", schema, obj->name);
+
+    }
+    else
+      g_string_append_printf(sql, " [%s]", obj->name);
   }
-  
+
   if (terr == NULL) {
     msctx_t *ctx = exec_sql(sql->str, &terr);
     close_sql(ctx);
@@ -330,6 +432,15 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
     if (obj->clmn_ctrt)
       def = g_strdup(obj->clmn_ctrt->def);
     break;
+  case R_PK:
+  case R_UQ:
+  case R_X:
+    if (obj->index != NULL)
+      def = g_strdup(obj->index->def);
+    break;
+  case R_F:
+    def = g_strdup(obj->foreign_ctrt->def);
+    break;
   default:
     def = load_help_text(parent, obj, &terr);
     break;
@@ -341,27 +452,66 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
   return def;
 }
 
-void rename_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
+void rename_ms_object(const char *schema_old, const char *schema_new,
 		      struct sqlfs_ms_obj *obj_old, struct sqlfs_ms_obj *obj_new,
-		      GError **error)
+		      struct sqlfs_ms_obj *parent, GError **error)
 {
   GError *terr = NULL;
-  if (obj_old->type == R_COL) {
-    GString *sql = g_string_new(NULL);    
-    g_string_append_printf(sql, "EXEC sp_rename '%s.%s.%s', '%s'",
-			   schema, parent->name,
-			   obj_old->name, obj_new->name);
-    msctx_t *ctx = exec_sql(sql->str, &terr);
-    close_sql(ctx);
+  
+  if (obj_old->type == R_TR && g_str_has_prefix(obj_old->name, "#"))
+    g_set_error(&terr, EENOTSUP, EENOTSUP,
+		"%d: operation not supported\n", __LINE__);
+
+  if (terr == NULL) {
+    GString *sql = g_string_new(NULL);
+
+    const gchar *wrksch = schema_old;
+    if (schema_old != NULL && schema_new != NULL
+	&& g_strcmp0(schema_old, schema_new)) {
+
+      switch(obj_old->type) {
+      case D_IT:
+      case D_S:
+      case D_TT:
+      case D_U:
+      case D_V:
+      case R_P:
+      case R_FN:
+      case R_FS:
+      case R_FT:
+	g_string_append_printf(sql, "ALTER SCHEMA [%s] TRANSFER [%s].[%s];\n",
+			       schema_new, schema_old, obj_old->name);
+	wrksch = schema_new;
+	break;
+      default:
+	g_set_error(&terr, EENOTSUP, EENOTSUP,
+		    "%d: operation not supported\n", __LINE__);
+      }
+      
+    }
+
+    if (terr == NULL && g_strcmp0(obj_old->name, obj_new->name)) {
+      switch (obj_old->type) {
+      case R_COL:
+      case R_X:
+	g_string_append_printf(sql, "EXEC sp_rename '[%s].[%s].[%s]', '%s'",
+			       wrksch, parent->name, obj_old->name, obj_new->name);
+	break;
+      default:
+	g_string_append_printf(sql, "EXEC sp_rename '[%s].[%s]', '%s'",
+			       wrksch, obj_old->name, obj_new->name);
+	break;
+      }
+    }
+
+    if (terr == NULL) {
+      msctx_t *ctx = exec_sql(sql->str, &terr);
+      close_sql(ctx);
+    }
+    
     g_string_free(sql, TRUE);
   }
-  else {
-    gchar *text = load_help_text(schema, obj_old, &terr);
-    remove_ms_object(schema, parent->name, obj_old, &terr);
-    write_ms_object(schema, parent, text, obj_new, &terr);
-    g_free(text);
-  }
-  
+    
   if (terr != NULL)
     g_propagate_error(error, terr);
 }
@@ -372,21 +522,24 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
   GList *reslist = NULL;
   GError *terr = NULL;
 
+  /* TODO: Кандидаты на распараллелирование */
   reslist = fetch_columns(table_id, name, &terr);
-  
+
   if (terr == NULL)
     reslist = g_list_concat(reslist, fetch_modules(table_id, name, &terr));
 
-  /*if (terr == NULL)
-    reslist = g_list_concat(reslist, fetch_indexes(table_id, name, &terr));*/
+  if (terr == NULL)
+    reslist = g_list_concat(reslist, fetch_indexes(table_id, name, &terr));
 
-  if (terr == NULL) {
+  if (terr == NULL)
     reslist = g_list_concat(reslist, fetch_constraints(table_id, name, &terr));
-  }
 
-  if (terr != NULL) {
-    g_message("%d: %s\n", terr->code, terr->message);
-  }
+  if (terr == NULL)
+    reslist = g_list_concat(reslist, fetch_foreignes(table_id, name, &terr));
+
+
+  if (terr != NULL)
+    g_propagate_error(error, terr);
   
   return reslist;
 }
@@ -426,13 +579,13 @@ GList * fetch_schema_obj(int schema_id, const char *name,
     dbbind(ctx->dbproc, 4, INTBIND, (DBINT) 0, (BYTE *) &cdate_buf);
     dbbind(ctx->dbproc, 5, INTBIND, (DBINT) 0, (BYTE *) &mdate_buf);
     dbbind(ctx->dbproc, 6, INTBIND, (DBINT) 0, (BYTE *) &def_len_buf);
+    
     int rowcode;
-    struct sqlfs_ms_obj * obj = NULL;
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
 	name_buf = trimwhitespace(name_buf);
-	obj = g_try_new0(struct sqlfs_ms_obj, 1);
+	struct sqlfs_ms_obj *obj = g_try_new0(struct sqlfs_ms_obj, 1);
 	obj->name = g_strdup(name_buf);
 	obj->type = str2mstype(trimwhitespace(type_buf));
 	obj->schema_id = schema_id;
@@ -488,15 +641,15 @@ GList * fetch_schemas(const char *name, GError **error)
     dbbind(ctx->dbproc, 2, STRINGBIND, dbcollen(ctx->dbproc, 2) + 1,
 	   (BYTE *) schname_buf);
 
-    struct sqlfs_ms_obj *obj = NULL;
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
-      case REG_ROW:
-	obj = g_try_new0(struct sqlfs_ms_obj, 1);
-	obj->name = g_strdup(trimwhitespace(schname_buf));
+      case REG_ROW: {
+	struct sqlfs_ms_obj *obj = g_try_new0(struct sqlfs_ms_obj, 1);
+	obj->name = g_strdup(g_strchomp(schname_buf));
 	obj->type = D_SCHEMA;
 	obj->schema_id = schid_buf;
 	lst = g_list_append(lst, obj);
+      }
 	break;
       case BUF_FULL:
 	g_set_error(&terr, EEFULL, EEFULL,
@@ -529,6 +682,67 @@ void free_ms_obj(gpointer msobj)
   struct sqlfs_ms_obj *obj = (struct sqlfs_ms_obj *) msobj;
   
   switch(obj->type) {
+  case R_D:
+    if (obj->clmn_ctrt != NULL) {
+      if (obj->clmn_ctrt->column_name != NULL) {
+	g_free(obj->clmn_ctrt->column_name);
+      }
+
+      if (obj->clmn_ctrt->def != NULL) {
+	g_free(obj->clmn_ctrt->def);
+      }
+      
+      g_free(obj->clmn_ctrt);
+    }
+    break;
+  case R_C:
+    if (obj->clmn_ctrt != NULL) {
+      if (obj->clmn_ctrt->def != NULL) {
+	g_free(obj->clmn_ctrt->def);
+      }
+      
+      g_free(obj->clmn_ctrt);
+    }
+    break;
+  case R_F:
+    if (obj->foreign_ctrt != NULL) {
+      if (obj->foreign_ctrt->columns_def != NULL)
+	g_free(obj->foreign_ctrt->columns_def);
+      
+      if (obj->foreign_ctrt->ref_object_def != NULL)
+	g_free(obj->foreign_ctrt->ref_object_def);
+
+      if (obj->foreign_ctrt->ref_columns_def != NULL)
+	g_free(obj->foreign_ctrt->ref_columns_def);
+
+      if (obj->foreign_ctrt->def != NULL)
+	g_free(obj->foreign_ctrt->def);
+
+      g_free(obj->foreign_ctrt);
+    }
+    break;
+  case R_PK:
+  case R_UQ:
+  case R_X:
+    if (obj->index != NULL) {
+      if (obj->index->filter_def != NULL)
+	g_free(obj->index->filter_def);
+
+      if (obj->index->columns_def != NULL)
+	g_free(obj->index->columns_def);
+
+      if (obj->index->incl_columns_def != NULL)
+	g_free(obj->index->incl_columns_def);
+
+      if (obj->index->data_space != NULL)
+	g_free(obj->index->data_space);
+
+      if (obj->index->def != NULL)
+	g_free(obj->index->def);
+      
+      g_free(obj->index);
+    }
+    break;
   case R_P:
   case D_V:
   case R_FN:
