@@ -532,7 +532,9 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
     if (fsfile->flush == TRUE && strlen(fsfile->buffer) > 0) {
       write_ms_object(*schema, pobj, fsfile->buffer, obj, &terr);
       fsfile->flush = FALSE;
-      
+
+      g_message("FLUSH: %d, %d", g_hash_table_contains(cache.cache_table, path),
+		g_hash_table_contains(cache.temp_table, path));
       SAFE_REMOVE_ALL(path);
     }
 
@@ -558,6 +560,9 @@ static int sqlfs_release(const char *path, struct fuse_file_info *fi)
   sqlfs_file_t *fsfile = g_hash_table_lookup(cache.open_table, &(fi->fh));
   if (!fsfile)
     err = -ENOENT;
+
+  g_message("RELEASE: %d, %d", g_hash_table_contains(cache.cache_table, path),
+	    g_hash_table_contains(cache.temp_table, path));
 
   g_hash_table_remove(cache.open_table, &(fi->fh));
   g_hash_table_remove(cache.cache_table, path);
@@ -585,12 +590,13 @@ static int sqlfs_unlink(const char *path)
       }
     }
     else {
-      if (!g_hash_table_contains(cache.temp_table, path)) {
-	remove_ms_object(*schema, *(schema + 1), object, &terr);
+      g_message("UNLINK: %d, %d", g_hash_table_contains(cache.cache_table, path),
+		g_hash_table_contains(cache.temp_table, path));
+      remove_ms_object(*schema, *(schema + 1), object, &terr);
 	
-	if (terr != NULL)
-	  err = -EFAULT;
-      }
+      if (terr != NULL && !g_hash_table_contains(cache.temp_table, path))
+	err = -EFAULT;
+
     }
     
     SAFE_REMOVE_ALL(path);
@@ -639,14 +645,15 @@ static int sqlfs_truncate(const char *path, off_t offset)
 	def = g_strndup(obj->def, offset);
       }
 
-    if (offset > 0 && def != NULL) {
+    if (obj->def != NULL)
       g_free(obj->def);
-      
+
+    if (offset > 0 && def != NULL) {
       obj->def = def;
       obj->len = strlen(obj->def);
     }
     else {
-      obj->def = NULL;
+      obj->def = g_strdup("\0");
       obj->len = 0;
     }
 
