@@ -101,8 +101,6 @@ struct sqlfs_ms_column {
   int not4repl;
   char *seed_val;
   char *inc_val;
-
-  char *def;
 };
 
 struct sqlfs_ms_constraint {
@@ -111,8 +109,6 @@ struct sqlfs_ms_constraint {
     int disabled;
   };
   int not4repl;
-  
-  char *def;
 };
 
 struct sqlfs_ms_module {
@@ -129,8 +125,6 @@ struct sqlfs_ms_fk {
   char *columns_def;
   char *ref_object_def;
   char *ref_columns_def;
-
-  char *def;
 };
 
 struct sqlfs_ms_index {
@@ -147,8 +141,6 @@ struct sqlfs_ms_index {
   char *columns_def;
   char *incl_columns_def;
   char *data_space;
-
-  char *def;
 };
 
 struct sqlfs_ms_obj {
@@ -156,6 +148,7 @@ struct sqlfs_ms_obj {
   int parent_id;
   int schema_id;
   char *name;
+
   unsigned int type;
   union {
     struct sqlfs_ms_module *sql_module;
@@ -165,7 +158,10 @@ struct sqlfs_ms_obj {
     struct sqlfs_ms_index *index;
     struct sqlfs_ms_constraint *clmn_ctrt;
   };
+  
+  char *def;
   unsigned int len;
+  
   time_t ctime;
   time_t mtime;
   time_t cached_time;

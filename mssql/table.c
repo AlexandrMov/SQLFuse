@@ -214,8 +214,8 @@ GList * fetch_columns(int tid, const char *name, GError **error)
 	  obj->column->inc_val = g_strdup(trimwhitespace(inc_val));
 	  obj->column->not4repl = not4repl;
 	}
-	obj->column->def = make_column_def(obj);
-	obj->len = strlen(obj->column->def);	
+	obj->def = make_column_def(obj);
+	obj->len = strlen(obj->def);	
       
 	reslist = g_list_append(reslist, obj);
       }
@@ -432,8 +432,8 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
 	  obj->clmn_ctrt->not4repl = not4repl;
 	}
 	
-	obj->clmn_ctrt->def = make_constraint_def(obj, trimwhitespace(def_text));
-	obj->len = strlen(obj->clmn_ctrt->def);
+	obj->def = make_constraint_def(obj, trimwhitespace(def_text));
+	obj->len = strlen(obj->def);
 
 	obj->cached_time = g_get_monotonic_time();
 	reslist = g_list_append(reslist, obj);
@@ -644,8 +644,8 @@ GList * fetch_foreignes(int tid, const char *name, GError **error)
 	}
 
 	obj->foreign_ctrt = fk;
-	obj->foreign_ctrt->def = make_foreign_def(obj);
-	obj->len = strlen(fk->def);
+	obj->def = make_foreign_def(obj);
+	obj->len = strlen(obj->def);
 
 	obj->cached_time = g_get_monotonic_time();
 	reslist = g_list_append(reslist, obj);
@@ -931,9 +931,9 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 	  idx->data_space = g_strdup(g_strchomp(data_space));
 	
 	obj->index = idx;
-	idx->def = make_index_def(g_strchomp(schema_name),
+	obj->def = make_index_def(g_strchomp(schema_name),
 				  g_strchomp(table_name), obj);
-	obj->len = strlen(idx->def);
+	obj->len = strlen(obj->def);
 	obj->cached_time = g_get_monotonic_time();
 	reslist = g_list_append(reslist, obj);
 	break;
