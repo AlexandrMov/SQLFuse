@@ -53,7 +53,7 @@ char * create_column_def(const char *schema, const char *table,
   else {
     g_string_append(sql, " ADD ");
   }
-  g_string_append_printf(sql, "%s %s", obj->name, def);
+  g_string_append_printf(sql, "[%s] %s", obj->name, def);
 
   result = g_strdup(sql->str);
   g_string_free(sql, TRUE);
@@ -104,7 +104,7 @@ char * make_column_def(struct sqlfs_ms_obj *obj)
   char *text = NULL;
   struct sqlfs_ms_column *col = obj->column;
   GString *def = g_string_new(NULL);
-  g_string_append_printf(def, "COLUMN %s %s", obj->name, col->type_name);
+  g_string_append_printf(def, "COLUMN [%s] %s", obj->name, col->type_name);
   
   if (!g_strcmp0(col->type_name, "float"))
     g_string_append_printf(def, "(%d)", col->precision);

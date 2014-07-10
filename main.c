@@ -163,6 +163,10 @@ static struct sqlfs_ms_obj * find_object(const char *pathname, GError **error)
 static int sqlfs_getattr(const char *path, struct stat *stbuf)
 {
   int err = 0;
+
+  if (g_regex_match_simple("\\.dav$|\\.html$|\\.exe$|\\.cmd$|\\.ini$|\\.bat$|\\.vbs$|\\.vbe$", path, G_REGEX_CASELESS, 0))
+    return -ENOENT;
+
   memset(stbuf, 0, sizeof(struct stat));
   
   if (g_strcmp0(path, G_DIR_SEPARATOR_S) == 0) {
@@ -722,15 +726,24 @@ static int sqlfs_rename(const char *oldname, const char *newname)
       
       obj_old->name = g_path_get_basename(oldname);
       obj_new->name = g_path_get_basename(newname);
-  
-      rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,
-		       ppobj_old, &terr);
-      
-      if (terr == NULL) {
-	SAFE_REMOVE_ALL(oldname);
-      }
-      else {
-	err = -EFAULT;
+
+      if (!g_hash_table_contains(cache.temp_table, oldname)) {
+      	rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,
+		         ppobj_old, &terr);
+
+	if (terr == NULL) {
+          SAFE_REMOVE_ALL(oldname);
+	}
+      	else {
+          err = -EFAULT;
+	}
+
+      } else {
+	 obj_old->name = g_strdup(obj_new->name);
+	 g_mutex_lock(&cache.m);
+         g_hash_table_steal(cache.temp_table, oldname);
+ 	 g_hash_table_insert(cache.temp_table, g_strdup(newname), obj_old);
+	 g_mutex_unlock(&cache.m);
       }
       
     }
