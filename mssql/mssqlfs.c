@@ -191,7 +191,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
   int error = 0;
   GError *terr = NULL;
   start_checker();
-
+  g_message("TEXT:\n %s \n", text);
   YY_BUFFER_STATE bp;
   bp = yy_scan_string(text);
   yy_switch_to_buffer(bp);  

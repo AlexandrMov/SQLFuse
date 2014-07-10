@@ -27,6 +27,8 @@ struct sqlcache {
 
 struct sqlprofile {
   char *profile;
+  uid_t uid;
+  gid_t gid;
 };
 
 typedef struct {
@@ -41,6 +43,7 @@ typedef struct {
 #include <string.h>
 
 static struct sqlcache cache;
+static struct sqlprofile *sqlprofile;
 
 #define SQLFS_OPT(t, p, v) { t, offsetof(struct sqlprofile, p), v }
 
@@ -54,6 +57,8 @@ static struct sqlcache cache;
 
 static struct fuse_opt sqlfs_opts[] = {
   SQLFS_OPT("profilename=%s", profile, 0),
+  SQLFS_OPT("uid=%d", uid, 0),
+  SQLFS_OPT("gid=%d", gid, 0),
 
   FUSE_OPT_END
 };
@@ -180,12 +185,14 @@ static int sqlfs_getattr(const char *path, struct stat *stbuf)
       }
       stbuf->st_mtime = object->mtime;
       stbuf->st_ino = object->object_id;
-      
     }
 
     if (terr != NULL)
       g_error_free(terr);
   }
+
+  stbuf->st_uid = sqlprofile->uid;
+  stbuf->st_gid = sqlprofile->gid;
 
   return err;
 }
@@ -533,8 +540,6 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
       write_ms_object(*schema, pobj, fsfile->buffer, obj, &terr);
       fsfile->flush = FALSE;
 
-      g_message("FLUSH: %d, %d", g_hash_table_contains(cache.cache_table, path),
-		g_hash_table_contains(cache.temp_table, path));
       SAFE_REMOVE_ALL(path);
     }
 
@@ -561,9 +566,6 @@ static int sqlfs_release(const char *path, struct fuse_file_info *fi)
   if (!fsfile)
     err = -ENOENT;
 
-  g_message("RELEASE: %d, %d", g_hash_table_contains(cache.cache_table, path),
-	    g_hash_table_contains(cache.temp_table, path));
-
   g_hash_table_remove(cache.open_table, &(fi->fh));
   g_hash_table_remove(cache.cache_table, path);
   
@@ -573,7 +575,6 @@ static int sqlfs_release(const char *path, struct fuse_file_info *fi)
 static int sqlfs_unlink(const char *path)
 {
   int err = 0;
-
   gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
   if (schema == NULL)
     err = -EFAULT; 
@@ -590,8 +591,6 @@ static int sqlfs_unlink(const char *path)
       }
     }
     else {
-      g_message("UNLINK: %d, %d", g_hash_table_contains(cache.cache_table, path),
-		g_hash_table_contains(cache.temp_table, path));
       remove_ms_object(*schema, *(schema + 1), object, &terr);
 	
       if (terr != NULL && !g_hash_table_contains(cache.temp_table, path))
@@ -695,14 +694,25 @@ static int sqlfs_rename(const char *oldname, const char *newname)
   
   if (!err) {
     GError *terr = NULL;
+
+    struct sqlfs_ms_obj *obj_new = find_object(newname, &terr);
+    if (terr == NULL) {
+      remove_ms_object(*schemanew, *(schemanew + 1), obj_new, &terr);
+      if (terr != NULL)
+	g_clear_error(&terr);
+      
+      SAFE_REMOVE_ALL(newname);
+    }
+    else
+      g_clear_error(&terr);
     
     gchar *ppold = g_path_get_dirname(oldname),
       *ppnew = g_path_get_dirname(newname);
   
     struct sqlfs_ms_obj
       *ppobj_old = find_object(ppold, &terr),
-      *obj_old = find_object(oldname, &terr),
-      *obj_new = g_try_new0(struct sqlfs_ms_obj, 1);
+      *obj_old = find_object(oldname, &terr);
+    obj_new = g_try_new0(struct sqlfs_ms_obj, 1);
 
     if (terr != NULL && terr->code == EENOTFOUND)
       err = -ENOENT;
@@ -780,7 +790,7 @@ int main (int argc, char **argv)
 {
   int res = 0;
   struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
-  struct sqlprofile *profile = g_try_new0(struct sqlprofile, 1);
+  sqlprofile = g_try_new0(struct sqlprofile, 1);
   g_mutex_init(&cache.m);
   cache.cache_table = g_hash_table_new_full(g_str_hash, g_str_equal,
 				      g_free, free_ms_obj);
@@ -789,13 +799,13 @@ int main (int argc, char **argv)
   cache.open_table = g_hash_table_new_full(g_int64_hash, g_int64_equal,
 					   g_free, free_sqlfs_file);
 
-  if (fuse_opt_parse(&args, profile, sqlfs_opts, sqlfs_opt_proc) == -1)
+  if (fuse_opt_parse(&args, sqlprofile, sqlfs_opts, sqlfs_opt_proc) == -1)
     res = 1;
 
   if (!res) {
     GError *terr = NULL;
     
-    init_keyfile(profile->profile, &terr);
+    init_keyfile(sqlprofile->profile, &terr);
     if (terr != NULL)
       res = 1;
     
@@ -804,13 +814,6 @@ int main (int argc, char **argv)
       
       if (terr != NULL)
 	res = 2;
-    }
-
-    if (profile != NULL) {
-      if (profile->profile != NULL)
-	g_free(profile->profile);
-
-      g_free(profile);
     }
 
     if (!res) {
@@ -826,6 +829,14 @@ int main (int argc, char **argv)
 
     if (!res || res > 1)
       close_keyfile();
+
+    if (sqlprofile != NULL) {
+      if (sqlprofile->profile != NULL)
+	g_free(sqlprofile->profile);
+
+      g_free(sqlprofile);
+    }
+
 
     if (terr != NULL)
       g_error_free(terr);
