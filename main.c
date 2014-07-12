@@ -164,8 +164,10 @@ static int sqlfs_getattr(const char *path, struct stat *stbuf)
 {
   int err = 0;
 
-  if (g_regex_match_simple("\\.dav$|\\.html$|\\.exe$|\\.cmd$|\\.ini$|\\.bat$|\\.vbs$|\\.vbe$", path, G_REGEX_CASELESS, 0))
+  char *filter = get_context()->filter;
+  if (filter != NULL && g_regex_match_simple(filter, path, 0, 0)) {
     return -ENOENT;
+  }
 
   memset(stbuf, 0, sizeof(struct stat));
   

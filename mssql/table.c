@@ -509,8 +509,6 @@ static inline GString * make_fk_action(GString *sql, const char *act_name,
   
   g_string_append_printf(sql, " ON %s %s", act_name, act_desc);
   
-  g_free(act_desc);
-  
   return sql;
 }
 

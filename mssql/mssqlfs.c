@@ -616,9 +616,18 @@ GList * fetch_schema_obj(int schema_id, const char *name,
 GList * fetch_schemas(const char *name, GError **error)
 {
   GString * sql = g_string_new(NULL);
-  g_string_append(sql, "SELECT schema_id, name FROM sys.schemas");
+  g_string_append(sql, "SELECT schema_id, name FROM sys.schemas ");
+  
   if (name)
-    g_string_append_printf(sql, " WHERE name = '%s'", name);
+    g_string_append_printf(sql, "WHERE name = '%s'", name);
+  else {
+    gchar **excl = get_context()->excl_sch;
+    if (excl != NULL && g_strv_length(excl) > 0) {
+      gchar *excl_sch = g_strjoinv("','", excl);
+      g_string_append_printf(sql, "WHERE name NOT IN ('%s')", excl_sch);
+      g_free(excl_sch);
+    }
+  }
 
   GList *lst = NULL;
   GError *terr = NULL;
