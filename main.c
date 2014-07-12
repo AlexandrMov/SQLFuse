@@ -679,6 +679,46 @@ static int sqlfs_truncate(const char *path, off_t offset)
   return err;
 }
 
+static inline void do_rename(const char *oldname, const char *newname,
+			     gchar **schemaold, gchar **schemanew, GError **error)
+{
+  GError *terr = NULL;
+  gchar *ppold = g_path_get_dirname(oldname);
+  
+  struct sqlfs_ms_obj
+    *ppobj_old = find_object(ppold, &terr),
+    *obj_old = find_object(oldname, &terr),
+    *obj_new = g_try_new0(struct sqlfs_ms_obj, 1);
+  
+  if (terr == NULL) {
+    obj_old->name = g_path_get_basename(oldname);
+    obj_new->name = g_path_get_basename(newname);
+    
+    if (!g_hash_table_contains(cache.temp_table, oldname)) {
+      rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,
+		       ppobj_old, &terr);
+      
+      if (terr == NULL) {
+	SAFE_REMOVE_ALL(oldname);
+      }
+      
+    } else {
+      obj_old->name = g_strdup(obj_new->name);
+      g_mutex_lock(&cache.m);
+      g_hash_table_steal(cache.temp_table, oldname);
+      g_hash_table_insert(cache.temp_table, g_strdup(newname), obj_old);
+      g_mutex_unlock(&cache.m);
+    }
+    
+  }
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+  
+  g_free(ppold);
+  free_ms_obj(obj_new);
+}
+
 static int sqlfs_rename(const char *oldname, const char *newname)
 {
   gchar **schemaold = g_strsplit(g_path_skip_root(oldname),
@@ -700,60 +740,63 @@ static int sqlfs_rename(const char *oldname, const char *newname)
   
   if (!err) {
     GError *terr = NULL;
-
+    
     struct sqlfs_ms_obj *obj_new = find_object(newname, &terr);
     if (terr == NULL) {
-      remove_ms_object(*schemanew, *(schemanew + 1), obj_new, &terr);
-      if (terr != NULL)
-	g_clear_error(&terr);
-      
-      SAFE_REMOVE_ALL(newname);
-    }
-    else
-      g_clear_error(&terr);
-    
-    gchar *ppold = g_path_get_dirname(oldname),
-      *ppnew = g_path_get_dirname(newname);
-  
-    struct sqlfs_ms_obj
-      *ppobj_old = find_object(ppold, &terr),
-      *obj_old = find_object(oldname, &terr);
-    obj_new = g_try_new0(struct sqlfs_ms_obj, 1);
-
-    if (terr != NULL && terr->code == EENOTFOUND)
-      err = -ENOENT;
-    
-    if (!err) {
-      g_clear_error(&terr);
-      
-      obj_old->name = g_path_get_basename(oldname);
-      obj_new->name = g_path_get_basename(newname);
-
-      if (!g_hash_table_contains(cache.temp_table, oldname)) {
-      	rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,
-		         ppobj_old, &terr);
-
-	if (terr == NULL) {
-          SAFE_REMOVE_ALL(oldname);
-	}
-      	else {
-          err = -EFAULT;
-	}
-
-      } else {
-	 obj_old->name = g_strdup(obj_new->name);
-	 g_mutex_lock(&cache.m);
-         g_hash_table_steal(cache.temp_table, oldname);
- 	 g_hash_table_insert(cache.temp_table, g_strdup(newname), obj_old);
-	 g_mutex_unlock(&cache.m);
+      if (g_hash_table_contains(cache.temp_table, newname)) {
+	g_hash_table_remove(cache.temp_table, newname);
+	do_rename(oldname, newname, schemaold, schemanew, &terr);
+	
+	if (terr != NULL)
+	  err = -EFAULT;
       }
+      else {
+	struct sqlfs_ms_obj *obj_old = find_object(oldname, &terr);
+	if (g_hash_table_contains(cache.temp_table, oldname)) {
+	  obj_old->name = g_strdup(obj_new->name);
+	  g_mutex_lock(&cache.m);
+	  g_hash_table_steal(cache.temp_table, oldname);
+	  g_hash_table_insert(cache.temp_table, g_strdup(newname), obj_old);
+	  g_mutex_unlock(&cache.m);
+	}
+	else {	    
+	  char *def = load_module_text(*schemaold, obj_old, &terr);
+	  if (terr == NULL) {
+	    gchar *ppnew = g_path_get_dirname(newname);
+	    
+	    g_free(obj_old->name);
+	    obj_old->name = g_strdup(obj_new->name);
+	    
+	    struct sqlfs_ms_obj *ppobj_new = find_object(ppnew, &terr);
+	    write_ms_object(*schemanew, ppobj_new, def, obj_old, &terr);
+	    g_free(ppnew);
+
+	    if (terr != NULL)
+	      err = -EFAULT;
+	  }
+	  else
+	    err = -EFAULT;
+	}
+	
+	SAFE_REMOVE_ALL(oldname);
+	SAFE_REMOVE_ALL(newname);
+      }
+    }
+    else {
+      g_clear_error(&terr);
+      
+      if (g_hash_table_contains(cache.temp_table, newname))
+	g_hash_table_remove(cache.temp_table, newname);
+
+      do_rename(oldname, newname, schemaold, schemanew, &terr);
+
+      if (terr != NULL)
+	err = -EFAULT;
       
     }
 
     if (terr != NULL)
       g_error_free(terr);
-    
-    free_ms_obj(obj_new);
   }
   
   g_strfreev(schemanew);
