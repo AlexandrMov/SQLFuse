@@ -525,7 +525,7 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
   int err = 0;
   sqlfs_file_t *fsfile = g_hash_table_lookup(cache.open_table, &(fi->fh));
   if (!fsfile)
-    return -ENOENT;
+    return err;
   
   gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
   if (schema == NULL)
