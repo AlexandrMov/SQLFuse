@@ -217,7 +217,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
     case DEFAULT:
       obj->type = R_D;
       wrktext = create_constr_def(schema, parent->name, obj,
-				  text + node->first_column - 1);
+				  text + node->last_column);
       break;
     case PRIMARY_KEY:
 
@@ -402,6 +402,7 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
       module = g_try_new0(struct sqlfs_ms_module, 1);
       obj->sql_module = module;
       obj->def = g_strdup(sql->str);
+      obj->len = strlen(obj->def);
     }
       
   }

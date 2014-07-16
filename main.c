@@ -568,12 +568,11 @@ static int sqlfs_release(const char *path, struct fuse_file_info *fi)
 {
   int err = 0;
 
-  sqlfs_file_t *fsfile = g_hash_table_lookup(cache.open_table, &(fi->fh));
-  if (!fsfile)
-    err = -ENOENT;
+  if (g_hash_table_contains(cache.open_table, &(fi->fh)))
+    g_hash_table_remove(cache.open_table, &(fi->fh));
 
-  g_hash_table_remove(cache.open_table, &(fi->fh));
-  g_hash_table_remove(cache.cache_table, path);
+  if (g_hash_table_contains(cache.cache_table, path))
+    g_hash_table_remove(cache.cache_table, path);
   
   return err;
 }

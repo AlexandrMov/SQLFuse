@@ -331,8 +331,7 @@ char * make_constraint_def(struct sqlfs_ms_obj *ctrt, const char *def)
   
   if (ctrt->type == R_D) {
     g_string_append_printf(sql, "CONSTRAINT %s ", ctrt->name);
-    g_string_append_printf(sql, "DEFAULT (%s) FOR %s",
-			   def, ctrt->clmn_ctrt->column_name);
+    g_string_append_printf(sql, "DEFAULT %s", def);
   }
   else
     if (ctrt->type == R_C) {
@@ -348,6 +347,8 @@ char * make_constraint_def(struct sqlfs_ms_obj *ctrt, const char *def)
 
       g_string_append_printf(sql, "(%s)", def);
     }
+
+  g_string_append(sql, "\n");
 
   text = g_strdup(sql->str);
   g_string_free(sql, TRUE);
