@@ -191,7 +191,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
   int error = 0;
   GError *terr = NULL;
   start_checker();
-  g_message("TEXT:\n %s \n", text);
+
   YY_BUFFER_STATE bp;
   bp = yy_scan_string(text);
   yy_switch_to_buffer(bp);  
@@ -270,7 +270,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       wrktext = g_strdup(text);
     }
     g_message("SQL:\n %s", wrktext);
-    msctx_t *ctx = exec_sql(wrktext, &terr);
+    msctx_t *ctx = exec_sql(g_strchomp(wrktext), &terr);
     close_sql(ctx);
     g_free(wrktext);
   }
@@ -401,6 +401,14 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
     if (!terr) {
       module = g_try_new0(struct sqlfs_ms_module, 1);
       obj->sql_module = module;
+
+      /* FIXME: #23 */
+      if (obj->len > strlen(sql->str)) {
+	char *nlspc = g_strnfill(obj->len - strlen(sql->str), ' ');
+	g_string_append_printf(sql, nlspc);
+	g_free(nlspc);
+      }
+      
       obj->def = g_strdup(sql->str);
       obj->len = strlen(obj->def);
     }
