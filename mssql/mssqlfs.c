@@ -217,7 +217,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
     case DEFAULT:
       obj->type = R_D;
       wrktext = create_constr_def(schema, parent->name, obj,
-				  text + node->first_column - 1);
+				  text + node->last_column);
       break;
     case PRIMARY_KEY:
 
@@ -248,7 +248,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       GString *sql = g_string_new(NULL);
       g_string_append_len(sql, text, node->module_node->first_columnm - 1);
       if (obj->object_id)
-	g_string_append(sql, "ALTER ");
+	g_string_append(sql, "ALTER");
       else
 	g_string_append(sql, "CREATE");
       
@@ -270,7 +270,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       wrktext = g_strdup(text);
     }
 
-    msctx_t *ctx = exec_sql(wrktext, &terr);
+    msctx_t *ctx = exec_sql(g_strchomp(wrktext), &terr);
     close_sql(ctx);
     g_free(wrktext);
   }
@@ -400,9 +400,17 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
       
     if (!terr) {
       module = g_try_new0(struct sqlfs_ms_module, 1);
-      module->def = g_strdup(sql->str);
       obj->sql_module = module;
-      def = g_strdup(sql->str);
+
+      /* FIXME: #23 */
+      if (obj->len > strlen(sql->str)) {
+	char *nlspc = g_strnfill(obj->len - strlen(sql->str), ' ');
+	g_string_append_printf(sql, nlspc);
+	g_free(nlspc);
+      }
+      
+      obj->def = g_strdup(sql->str);
+      obj->len = strlen(obj->def);
     }
       
   }
@@ -413,7 +421,7 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
   if (terr != NULL)
     g_propagate_error(error, terr);
 
-  return def;
+  return obj->def;
 }
 
 char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
@@ -421,25 +429,16 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
 {
   GError *terr = NULL;
   char *def = NULL;
-
+  
   switch(obj->type) {
   case R_COL:
-    if (obj->column)
-      def = g_strdup(obj->column->def);
-    break;
   case R_C:
   case R_D:
-    if (obj->clmn_ctrt)
-      def = g_strdup(obj->clmn_ctrt->def);
-    break;
   case R_PK:
   case R_UQ:
   case R_X:
-    if (obj->index != NULL)
-      def = g_strdup(obj->index->def);
-    break;
   case R_F:
-    def = g_strdup(obj->foreign_ctrt->def);
+    def = obj->def;
     break;
   default:
     def = load_help_text(parent, obj, &terr);
@@ -626,9 +625,18 @@ GList * fetch_schema_obj(int schema_id, const char *name,
 GList * fetch_schemas(const char *name, GError **error)
 {
   GString * sql = g_string_new(NULL);
-  g_string_append(sql, "SELECT schema_id, name FROM sys.schemas");
+  g_string_append(sql, "SELECT schema_id, name FROM sys.schemas ");
+  
   if (name)
-    g_string_append_printf(sql, " WHERE name = '%s'", name);
+    g_string_append_printf(sql, "WHERE name = '%s'", name);
+  else {
+    gchar **excl = get_context()->excl_sch;
+    if (excl != NULL && g_strv_length(excl) > 0) {
+      gchar *excl_sch = g_strjoinv("','", excl);
+      g_string_append_printf(sql, "WHERE name NOT IN ('%s')", excl_sch);
+      g_free(excl_sch);
+    }
+  }
 
   GList *lst = NULL;
   GError *terr = NULL;
@@ -688,19 +696,11 @@ void free_ms_obj(gpointer msobj)
 	g_free(obj->clmn_ctrt->column_name);
       }
 
-      if (obj->clmn_ctrt->def != NULL) {
-	g_free(obj->clmn_ctrt->def);
-      }
-      
       g_free(obj->clmn_ctrt);
     }
     break;
   case R_C:
     if (obj->clmn_ctrt != NULL) {
-      if (obj->clmn_ctrt->def != NULL) {
-	g_free(obj->clmn_ctrt->def);
-      }
-      
       g_free(obj->clmn_ctrt);
     }
     break;
@@ -714,9 +714,6 @@ void free_ms_obj(gpointer msobj)
 
       if (obj->foreign_ctrt->ref_columns_def != NULL)
 	g_free(obj->foreign_ctrt->ref_columns_def);
-
-      if (obj->foreign_ctrt->def != NULL)
-	g_free(obj->foreign_ctrt->def);
 
       g_free(obj->foreign_ctrt);
     }
@@ -736,9 +733,6 @@ void free_ms_obj(gpointer msobj)
 
       if (obj->index->data_space != NULL)
 	g_free(obj->index->data_space);
-
-      if (obj->index->def != NULL)
-	g_free(obj->index->def);
       
       g_free(obj->index);
     }
@@ -748,8 +742,6 @@ void free_ms_obj(gpointer msobj)
   case R_FN:
   case R_TF:
     if (obj->sql_module != NULL) {
-      if (obj->sql_module->def != NULL)
-	g_free(obj->sql_module->def);
       
       g_free(obj->sql_module);
     }
@@ -758,9 +750,6 @@ void free_ms_obj(gpointer msobj)
     if (obj->column != NULL) {
       if (obj->column->type_name != NULL)
 	g_free(obj->column->type_name);
-
-      if (obj->column->def != NULL)
-	g_free(obj->column->def);
       
       if (obj->column->identity) {
 	if (obj->column->seed_val != NULL)
@@ -783,10 +772,14 @@ void free_ms_obj(gpointer msobj)
     break;
   }
 
+  if (obj->def != NULL)
+    g_free(obj->def);
+  
   if (obj->name)
     g_free(obj->name);
-  
-  g_free(obj);
+
+  if (obj != NULL)
+    g_free(obj);
 }
 
 void close_msctx(GError **error)

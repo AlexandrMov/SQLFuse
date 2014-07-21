@@ -27,6 +27,9 @@ typedef struct {
   char *servername, *dbname, *auth;
   char *username, *password;
   char *from_codeset, *to_codeset;
+  char *filter;
+
+  char **excl_sch;
 
   gboolean ansi_npw, merge_names;
 
@@ -39,6 +42,11 @@ typedef struct {
  * Инициализировать конфигурационный файл
  */
 void init_keyfile(const char *profile, GError **error);
+
+/*
+ * Вернуть рабочий контекст
+ */
+sqlctx_t * get_context();
 
 /*
  * Загрузить контекст

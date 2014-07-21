@@ -227,17 +227,13 @@ with_check_def: check_def
 }
 ;
 
-default_def: DEFAULT const_expr FOR obj_name
+default_def: DEFAULT
 {
-	put_default($4.schema, $4.objname,
-		    @2.first_column, @2.first_line,
-		    @2.last_column, @2.last_line);
-	YYACCEPT;
+  put_node(DEFAULT, NULL, NULL,
+	   @1.first_column, @1.first_line,
+	   @1.last_column, @1.last_line);
+  YYACCEPT;
 }
-
-const_expr: scalar_exp
-	    | '(' const_expr ')'
-;
 
 atom: INTNUM
       | STRING
