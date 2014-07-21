@@ -26,7 +26,7 @@
   g_string_append_printf(sql, "ALTER TABLE [%s].[%s]", sch, tbl);	\
   if (obj->object_id) {							\
     g_string_append_printf(sql, " DROP CONSTRAINT [%s] \n", obj->name);	\
-    g_string_append_printf(sql, "ALTER TABLE [%s].[%s]", sch, tbl);	\
+    g_string_append_printf(sql, "ALTER TABLE [%s].[%s] ", sch, tbl);	\
   }
 
 #define IDX_PRMS_BOOL(sql, field)		\

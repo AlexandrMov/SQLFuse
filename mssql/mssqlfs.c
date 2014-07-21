@@ -269,7 +269,7 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
     default:
       wrktext = g_strdup(text);
     }
-    g_message("SQL:\n %s", wrktext);
+
     msctx_t *ctx = exec_sql(g_strchomp(wrktext), &terr);
     close_sql(ctx);
     g_free(wrktext);
