@@ -778,7 +778,6 @@ static int sqlfs_rename(const char *oldname, const char *newname)
 	}
 	
 	SAFE_REMOVE_ALL(oldname);
-	SAFE_REMOVE_ALL(newname);
       }
     }
     else {
