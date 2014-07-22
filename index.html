@@ -1,0 +1,147 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <title>SQLFuse by AlexandrMov</title>
+
+    <link rel="stylesheet" href="stylesheets/styles.css">
+    <link rel="stylesheet" href="stylesheets/pygment_trac.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <!--[if lt IE 9]>
+    <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+  </head>
+  <body>
+    <div class="wrapper">
+      <header>
+        <h1>SQLFuse</h1>
+        <p>User-mode filesystem that maps SQL Server objects at files</p>
+
+        <p class="view"><a href="https://github.com/AlexandrMov/SQLFuse">View the Project on GitHub <small>AlexandrMov/SQLFuse</small></a></p>
+
+
+        <ul>
+          <li><a href="https://github.com/AlexandrMov/SQLFuse/zipball/master">Download <strong>ZIP File</strong></a></li>
+          <li><a href="https://github.com/AlexandrMov/SQLFuse/tarball/master">Download <strong>TAR Ball</strong></a></li>
+          <li><a href="https://github.com/AlexandrMov/SQLFuse">View On <strong>GitHub</strong></a></li>
+        </ul>
+      </header>
+      <section>
+        <h1>
+<a name="sqlfuse" class="anchor" href="#sqlfuse"><span class="octicon octicon-link"></span></a>SQLFuse</h1>
+
+<h2>
+<a name="%D0%A7%D1%82%D0%BE-%D1%8D%D1%82%D0%BE" class="anchor" href="#%D0%A7%D1%82%D0%BE-%D1%8D%D1%82%D0%BE"><span class="octicon octicon-link"></span></a>Что это?</h2>
+
+<p>SQLFuse - это файловая система пользовательского режима, основанная на <a href="http://fuse.sourceforge.net/">FUSE</a>, которая отображает объекты сервера SQL на файловую систему: схемы, таблицы, представления, хранимые процедуры, функции, колонки, триггеры и др. Кроме отображения объектов SQLFuse частично поддерживает их создание, редактирование и удаление.</p>
+
+<h2>
+<a name="%D0%9B%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5" class="anchor" href="#%D0%9B%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5"><span class="octicon octicon-link"></span></a>Лицензирование</h2>
+
+<p>О порядке распространения и лицензирования SQLFuse вы можете прочитать в файле LICENSE.</p>
+
+<h2>
+<a name="%D0%A1%D0%B1%D0%BE%D1%80%D0%BA%D0%B0-%D0%B8-%D1%83%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B0" class="anchor" href="#%D0%A1%D0%B1%D0%BE%D1%80%D0%BA%D0%B0-%D0%B8-%D1%83%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B0"><span class="octicon octicon-link"></span></a>Сборка и установка</h2>
+
+<p>Сборка осуществляется путём вызова команд:</p>
+
+<div class="highlight highlight-bash"><pre>make clean
+make
+</pre></div>
+
+<blockquote>
+<p>Установка в систему пока не предусмотрена.</p>
+</blockquote>
+
+<h2>
+<a name="%D0%97%D0%B0%D0%BF%D1%83%D1%81%D0%BA-%D0%B8-%D0%BD%D0%B0%D1%81%D1%82%D1%80%D0%BE%D0%B9%D0%BA%D0%B0" class="anchor" href="#%D0%97%D0%B0%D0%BF%D1%83%D1%81%D0%BA-%D0%B8-%D0%BD%D0%B0%D1%81%D1%82%D1%80%D0%BE%D0%B9%D0%BA%D0%B0"><span class="octicon octicon-link"></span></a>Запуск и настройка</h2>
+
+<p>SQLFuse основана на FUSE, поэтому про опции монтирования вы можете прочитать на <a href="http://fuse.sourceforge.net/">FUSE</a>. Параметры монтирования в опции <code>-o</code> относящиеся к SQLFuse представлены ниже:</p>
+
+<ul>
+<li>
+<code>profilename</code>  - наименование профиля, которое определено в конфигурационном файле <code>sqlfuse.conf</code>, который находится в каталоге <code>conf/</code> в корневой директории SQLFuse.</li>
+</ul><p>Пример монтирования БД AdventureWorks2008R2:</p>
+
+<div class="highlight highlight-bash"><pre>./sqlfuse -o <span class="nv">profilename</span><span class="o">=</span>AdventureWorks2008R2 ~/myserver/advworks
+</pre></div>
+
+<h2>
+<a name="sqlfuseconf" class="anchor" href="#sqlfuseconf"><span class="octicon octicon-link"></span></a>sqlfuse.conf</h2>
+
+<p>Конфигурационные файлы задают порядок работы и удобство настройки SQLFuse. Синтаксис имеет сходство с .ini-файлами, и позволяет описать группы, содержащие пары ключ-значение.
+Пример использования формата можно найти на сайте freedesktop.org, например:</p>
+
+<ul>
+<li><a href="http://freedesktop.org/Standards/desktop-entry-spec">Desktop Entry Specification</a></li>
+<li><a href="http://freedesktop.org/Standards/icon-theme-spec">Icon Theme Specification</a></li>
+</ul><p>Файл же <code>sqlfuse.conf</code> должен включать одну или более групп, имеющие пары ключ-значение. Наименование группы задаёт имя профиля, которое будет искать SQLFuse при монтировании в параметре <code>profilename</code> опции <code>-o</code>. Существует и зарезервированное наименование группы - <code>[global]</code>. Пары ключ-значение группы <code>[global]</code> заменяют пары ключ-значение других пользовательские групп. Таким образом, Вы можете задавать сквозные параметры, которые применимы ко всем профилям.</p>
+
+<p>Далее представлен список возможных ключей:</p>
+
+<ul>
+<li>
+<code>appname</code> - задаёт наименование приложения, которое будет передаваться в параметрах подключения к серверу, - по умолчанию SQLFuse;</li>
+<li>
+<code>maxconn</code> - устанавливает количество подключений, которое будет постоянно поддерживать SQLFuse, при соединении с сервером SQL (если Вы используете графическую среду на подобие GNOME или KDE для навигации, желательно указать значение 2 или более), ожидает целочисленное значение;</li>
+<li>
+<code>to_codeset</code>, <code>from_codeset</code> - конвертирует текст определений модулей сервера SQL заданную кодировку <code>to_codeset</code> из <code>from_codeset</code> (должен быть установлен <code>iconv</code>), ожидает текстовое значение;</li>
+<li>
+<code>ansi_npw</code> - принудительное включение параметров <code>QUOTED_IDENTIFIER</code>, <code>ANSI_NULLS</code>, <code>ANSI_WARNINGS</code>, <code>ANSI_PADDINGS</code>, <code>CONCAT_NULL_YIELDS_NULL</code> в состояние <code>ON</code>, - необходимо на некоторых старых серверах, и при не верной/необходимой настройки БД сервера, ожидает значения <code>true</code> или <code>false</code>;</li>
+<li>
+<code>servername</code> - имя и адрес экземпляра сервера, к которому необходимо подключиться;</li>
+<li>
+<code>dbname</code> - наименование базы данных, которую следует примонтировать к файловой системе;</li>
+<li>
+<code>auth</code> - наименование профиля авторизации, который задан в файле <code>sqlconf.auth.conf</code> (см. след. раздел);</li>
+<li>
+<code>username</code> - логин пользователя БД;</li>
+<li>
+<code>password</code> - пароль пользователя БД;</li>
+<li>
+<code>default_column</code> - задаёт определение столбца по умолчанию; могут быть переданы шаблоны <code>%schema</code> и <code>%table</code>, заменяемые на наименования схемы и таблицы соответственно;</li>
+<li>
+<code>merge_names</code>  - если <code>%schema</code> и <code>%table</code> одинаковы, то заменить их, а также символы между ними на <code>%table</code>, принимает значение <code>true</code> или <code>false</code>;</li>
+<li>
+<code>exclude_schemas</code> - не отображать заданные схемы, разделённые <code>;</code>;</li>
+<li>
+<code>filter</code> - фильтр для объектов - регулярное выражение, - при совпадении пути объект не будет найден, <b>для фильтрации схем используйте</b> <code>exclude_schemas</code>.</li>
+</ul><blockquote>
+<p>При подключению к экземпляру сервера, например, <code>test\test</code>, экранировать символ <code>\</code> не нужно, - это делает за Вас SQLFuse, при чтении конфигурационных файлов.</p>
+</blockquote>
+
+<h2>
+<a name="sqlfuseauthconf" class="anchor" href="#sqlfuseauthconf"><span class="octicon octicon-link"></span></a>sqlfuse.auth.conf</h2>
+
+<p>Файл <code>sqlfuse.auth.conf</code> также располагается в директории <code>conf/</code> проекта SQLFuse и формат определённый freedesktop.org.
+Конфигурационный файл определяет профиль авторизации, наименование которого определяет имя группы. Профиль авторизации может присвоен подключению через параметр <code>auth</code> в файле <code>sqlfuse.conf</code>.</p>
+
+<p>Группа профиля авторизации имеет всего два параметра:</p>
+
+<ul>
+<li>
+<code>username</code> - логин пользователя БД;</li>
+<li>
+<code>password</code> - пароль пользователя БД.</li>
+</ul><blockquote>
+<p>Если Вам необходима авторизация в домене, то символ <code>\</code> экранировать нет необходимости.</p>
+</blockquote>
+
+<h2>
+<a name="%D0%9A%D0%BE%D0%BD%D1%82%D0%B0%D0%BA%D1%82%D1%8B-%D0%B8-%D0%BE%D0%B1%D1%80%D0%B0%D1%82%D0%BD%D0%B0%D1%8F-%D1%81%D0%B2%D1%8F%D0%B7%D1%8C" class="anchor" href="#%D0%9A%D0%BE%D0%BD%D1%82%D0%B0%D0%BA%D1%82%D1%8B-%D0%B8-%D0%BE%D0%B1%D1%80%D0%B0%D1%82%D0%BD%D0%B0%D1%8F-%D1%81%D0%B2%D1%8F%D0%B7%D1%8C"><span class="octicon octicon-link"></span></a>Контакты и обратная связь</h2>
+
+<ul>
+<li>если Вы хотите сообщить о конкретном баге, или оказать посильную помощь в разработке, то вам <a href="http://sqlfuse.org">сюда</a>;</li>
+<li>можете отправлять предложения и замечания напрямую автору <a href="mailto:sqlfuse@gmail.com">sqlfuse@gmail.com</a>.</li>
+</ul>
+      </section>
+      <footer>
+        <p>This project is maintained by <a href="https://github.com/AlexandrMov">AlexandrMov</a></p>
+        <p><small>Hosted on GitHub Pages &mdash; Theme by <a href="https://github.com/orderedlist">orderedlist</a></small></p>
+      </footer>
+    </div>
+    <script src="javascripts/scale.fix.js"></script>
+    
+  </body>
+</html>
