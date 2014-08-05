@@ -571,9 +571,6 @@ static int sqlfs_release(const char *path, struct fuse_file_info *fi)
   if (g_hash_table_contains(cache.open_table, &(fi->fh)))
     g_hash_table_remove(cache.open_table, &(fi->fh));
 
-  if (g_hash_table_contains(cache.cache_table, path))
-    g_hash_table_remove(cache.cache_table, path);
-  
   return err;
 }
 
