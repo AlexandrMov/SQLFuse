@@ -1,4 +1,4 @@
-#include "mssql.h"
+#include <sqlfuse.h>
 #include "msctx.h"
 
 #include <string.h>

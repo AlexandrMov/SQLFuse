@@ -18,8 +18,6 @@
 */
 
 #include <sqlfuse.h>
-
-#include <mssql/mssql.h>
 #include <conf/keyconf.h>
 
 struct sqlcache {

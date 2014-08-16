@@ -591,7 +591,6 @@ GList * fetch_schema_obj(int schema_id, const char *name,
 	obj->object_id = obj_id_buf;
 	obj->ctime = cdate_buf;
 	obj->mtime = mdate_buf;
-	obj->cached_time = g_get_monotonic_time();
 
 	if (obj->type == R_P || obj->type == D_V ||
 	    obj->type == R_FN || obj->type == R_TF) {

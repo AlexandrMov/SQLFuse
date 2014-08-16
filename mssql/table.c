@@ -294,8 +294,7 @@ GList * fetch_modules(int tid, const char *name, GError **error)
 	trgobj->ctime = cdate_buf;
 	trgobj->mtime = mdate_buf;
 	trgobj->len = def_len_buf;
-            
-	trgobj->cached_time = g_get_monotonic_time();
+        
 	list = g_list_append(list, trgobj);
 	break;
       case BUF_FULL:
@@ -436,7 +435,6 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
 	obj->def = make_constraint_def(obj, g_strchomp(def_text));
 	obj->len = strlen(obj->def);
 
-	obj->cached_time = g_get_monotonic_time();
 	reslist = g_list_append(reslist, obj);
 	break;
       case BUF_FULL:
@@ -646,7 +644,6 @@ GList * fetch_foreignes(int tid, const char *name, GError **error)
 	obj->def = make_foreign_def(obj);
 	obj->len = strlen(obj->def);
 
-	obj->cached_time = g_get_monotonic_time();
 	reslist = g_list_append(reslist, obj);
       }
 	break;
@@ -933,7 +930,6 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 	obj->def = make_index_def(g_strchomp(schema_name),
 				  g_strchomp(table_name), obj);
 	obj->len = strlen(obj->def);
-	obj->cached_time = g_get_monotonic_time();
 	reslist = g_list_append(reslist, obj);
 	break;
       case BUF_FULL:

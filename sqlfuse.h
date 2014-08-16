@@ -42,5 +42,93 @@
 #define EENOTFOUND 0x221
 #define EEPARSE 0x222
 
+#include <glib.h>
+
+
+struct sqlfs_object {
+  gchar *name;
+  int object_id;
+  unsigned int type;
+  
+  unsigned int len;
+  gchar *def;
+  
+  time_t ctime;
+  time_t mtime;
+  time_t cached_time;
+};
+
+
+/*
+ * Инициализировать кэш. Вызывается однажды.
+ */
+void init_cache(GError **error);
+
+
+/*
+ * Найти объект
+ */
+struct sqlfs_object * find_object(const char *pathfile, GError **error);
+
+
+/*
+ * Получить список объектов директории
+ */
+GList * fetch_dir_objects(const char *pathdir, GError **error);
+
+
+/*
+ * Создать директорию
+ */
+void create_dir(const char *pathdir, GError **error);
+
+
+/*
+ * Создать пустой модуль
+ */
+void create_node(const char *pathfile, GError **error);
+
+
+/*
+ * Получить текст определения модуля
+ */
+char * fetch_object_text(const char *path, GError **error);
+
+
+/*
+ * Записать модуль
+ */
+void write_object(const char *path, const char *buffer, GError **error);
+
+
+/*
+ * Переименовать модуль
+ */
+void rename_object(const char *oldpath, const char *newpath, GError **error);
+
+
+/*
+ * Обрезать текст модуля
+ */
+void truncate_object(const char *path, off_t offset, GError **error);
+
+
+/*
+ * Удалить объект
+ */
+void remove_object(const char *path, GError **error);
+
+
+/*
+ * Освободить занимаемую память
+ */
+void free_sqlfs_object(gpointer object);
+
+
+/*
+ * Освободить память, занимаемую кэшем. Вызывается однажды.
+ */
+void destroy_cache(GError **error);
+
 
 #endif
