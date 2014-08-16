@@ -17,40 +17,30 @@
   along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "msctx.h"
+#ifndef SQLFUSE_H
+#define SQLFUSE_H
 
-typedef struct {
-  LOGINREC *login;
-  DBPROCESS *dbproc;
-  
-  GMutex lock;
-  
-} msctx_t;
 
-/*
- *
- * Инициализация контекста
- *
- */
-void init_context(gpointer err_handler, gpointer msg_handler, GError **error);
+// Типы объектов
+#define SF_DIR 0x01
+#define SF_REG 0x02
 
-/*
- *
- * Выполнить SQL-запрос на основе контекста
- *
- */
-msctx_t * exec_sql(const char *sql, GError **err);
 
-/*
- *
- * Закончить выполнение SQL-запроса
- *
- */
-void close_sql(msctx_t *context);
+// Внутренние коды ошибок
+#define EENULL 0x101
+#define EENOTSUP 0x102
+#define EEMEM 0x109
+#define EELOGIN 0x110
+#define EECONN 0x111
+#define EEUSE 0x112
+#define EEINIT 0x113
+#define EEBUSY 0x114
+#define EECMD 0x121
+#define EEXEC 0x122
+#define EERES 0x123
+#define EEFULL 0x124
+#define EENOTFOUND 0x221
+#define EEPARSE 0x222
 
-/*
- *
- * Закрытие контекста
- *
- */
-void close_context(GError **error);
+
+#endif

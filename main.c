@@ -17,12 +17,14 @@
   along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "mssql/mssqlfs.h"
+#include <sqlfuse.h>
+
+#include <mssql/mssql.h>
 #include <conf/keyconf.h>
 
 struct sqlcache {
   GMutex m;
-  GHashTable *cache_table, *temp_table, *open_table;
+  GHashTable *open_table;
 };
 
 struct sqlprofile {
@@ -41,19 +43,13 @@ typedef struct {
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
+#include <stdlib.h>
 
 static struct sqlcache cache;
 static struct sqlprofile *sqlprofile;
 
 #define SQLFS_OPT(t, p, v) { t, offsetof(struct sqlprofile, p), v }
 
-#define SAFE_REMOVE_ALL(p)						\
-  g_mutex_lock(&cache.m);						\
-  if (g_hash_table_contains(cache.cache_table, p))			\
-    g_hash_table_remove(cache.cache_table, p);				\
-  if (g_hash_table_contains(cache.temp_table, p))			\
-    g_hash_table_remove(cache.temp_table, p);				\
-  g_mutex_unlock(&cache.m);
 
 static struct fuse_opt sqlfs_opts[] = {
   SQLFS_OPT("profilename=%s", profile, 0),
@@ -78,88 +74,6 @@ static int sqlfs_opt_proc(void * data, const char * arg, int key,
   }
 }
 
-static struct sqlfs_ms_obj * find_object(const char *pathname, GError **error)
-{
-  if (!g_path_is_absolute(pathname))
-    return NULL;
-
-  GList *list = NULL;
-  
-  const gchar * pn = g_path_skip_root(pathname);
-  if (pn == NULL)
-    pn = pathname;
-  
-  gchar **tree = g_strsplit(pn, G_DIR_SEPARATOR_S, -1);
-  if (tree == NULL)
-    return 0;
-
-  GError *terr = NULL;
-  GString * path = g_string_new(NULL);
-  guint i = 0;
-  
-  struct sqlfs_ms_obj *obj = g_hash_table_lookup(cache.temp_table, pathname);
-  if (!obj)
-    obj = g_hash_table_lookup(cache.cache_table, pathname);
-  
-  if (!obj) {
-    
-    while(*tree && !terr) {
-      g_string_append_printf(path, "%s%s", G_DIR_SEPARATOR_S, *tree);
-      obj = g_hash_table_lookup(cache.cache_table, path->str);
-      
-      if (!obj) {
-	if (i == 0) {
-	  obj = find_ms_object(NULL, *tree, &terr);
-	}
-	if (i > 0) {
-	  obj = find_ms_object(g_list_last(list)->data, *tree, &terr);
-	}
-      }
-      
-      if (!terr) {
-	
-	if (obj && obj->name) {
-	  list = g_list_append(list, obj);
-	  if (!g_hash_table_contains(cache.cache_table, path->str)) {
-	    g_mutex_lock(&cache.m);
-	    g_hash_table_insert(cache.cache_table, g_strdup(path->str), obj);
-	    g_mutex_unlock(&cache.m);
-	  }
-	}
-	else {
-	  g_set_error(&terr, EENOTFOUND, EENOTFOUND,
-		      "%d: Object not found\n", __LINE__);
-	  break;
-	}
-	
-      } else {
-	g_set_error(&terr, EERES, EERES,
-		    "%d: Find object failed\n", __LINE__);
-	break;
-      }
-      
-      tree++;
-      i++;
-    }
-    
-    GList *last = g_list_last(list);
-    if (last)
-      obj = last->data;
-    
-    g_list_free(list);
-    
-  }
-
-  tree -= i;
-  g_strfreev(tree);
-  g_string_free(path, TRUE);
-
-  if (terr != NULL)
-    g_propagate_error(error, terr); 
-  
-  return obj;
-}
-
 static int sqlfs_getattr(const char *path, struct stat *stbuf)
 {
   int err = 0;
@@ -176,12 +90,12 @@ static int sqlfs_getattr(const char *path, struct stat *stbuf)
     stbuf->st_nlink = 2;
   } else {
     GError *terr = NULL;
-    struct sqlfs_ms_obj *object = find_object(path, &terr);
+    struct sqlfs_object *object = find_object(path, &terr);
     if (terr != NULL) {
       err = -ENOENT;
     }
     else {
-      if (object->type < 0x08) {
+      if (object->type == SF_DIR) {
 	stbuf->st_mode = S_IFDIR | 0755;
 	stbuf->st_nlink = 2;
       } else {
@@ -191,8 +105,11 @@ static int sqlfs_getattr(const char *path, struct stat *stbuf)
       }
       stbuf->st_mtime = object->mtime;
       stbuf->st_ino = object->object_id;
+      
+      if (object != NULL)
+	free_sqlfs_object(object);
     }
-
+    
     if (terr != NULL)
       g_error_free(terr);
   }
@@ -209,69 +126,25 @@ static int sqlfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   filler(buf, ".", NULL, 0);
   filler(buf, "..", NULL, 0);
 
-  int nschema = g_strcmp0(path, G_DIR_SEPARATOR_S);
-  GList *wrk = NULL;
   GError *terr = NULL;
   int err = 0;
-  struct sqlfs_ms_obj *object = NULL;
-  
-  if (!nschema) {
-    wrk = fetch_schemas(NULL, &terr);
-  } else {
-    object = find_object(path, &terr);
-    if (terr != NULL && terr->code == EENOTFOUND) {
-      err = -ENOENT;
-    }
-    else {
-      if (object->type == D_SCHEMA) 
-	wrk = fetch_schema_obj(object->schema_id, NULL, &terr);
-      else if (object->type == D_U || object->type == D_V) {
-	wrk = fetch_table_obj(object->schema_id, object->object_id, NULL, &terr);
-      }
-      else
-	err = -ENOENT;
-    }
-  }
 
-  if (!err && terr == NULL && wrk) {
+  GList *wrk = fetch_dir_objects(path, &terr);
+  if (terr == NULL && wrk) {
     wrk = g_list_first(wrk);
-    gchar * str = NULL;
     while (wrk) {
-      object = wrk->data;
+      struct sqlfs_object *object = wrk->data;
       filler(buf, object->name, NULL, 0);
-      str = (nschema) ? g_strjoin(G_DIR_SEPARATOR_S, path, object->name, NULL)
-	: g_strconcat(path, object->name, NULL);
-      if (!g_hash_table_contains(cache.cache_table, str)
-	  && !g_hash_table_contains(cache.temp_table, str)) {
-	g_mutex_lock(&cache.m);
-	g_hash_table_insert(cache.cache_table, g_strdup(str), object);
-	g_mutex_unlock(&cache.m);
-      }
       wrk = g_list_next(wrk);
-      g_free(str);
     }
-    g_list_free(wrk);
-  
-    gchar *dir = g_path_get_dirname(path);
-    GHashTableIter iter;
-    gpointer key, value;
-
-    g_mutex_lock(&cache.m);
-    g_hash_table_iter_init(&iter, cache.temp_table);
-    while (g_hash_table_iter_next(&iter, &key, &value)) {
-      if (g_strcmp0(key, dir) == 0 && value) {
-	object = (struct sqlfs_ms_obj *) value;
-	filler(buf, object->name, NULL, 0);
-      }
-    }
-    g_mutex_unlock(&cache.m);
-    g_free(dir);
+    wrk = g_list_first(wrk);
+    g_list_free_full(wrk, &free_sqlfs_object);
   }
   else
     if (terr != NULL && terr->code == EERES) {
       err = -ECONNABORTED;
     }
-
+  
   if (terr != NULL)
     g_error_free(terr);
   
@@ -327,78 +200,36 @@ static int sqlfs_mkdir(const char *path, mode_t mode)
   
   if (S_ISDIR(mode))
     return -EPERM;
-
-  gchar **parent = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
-  if (parent == NULL)
-    err = -EFAULT;
-
-  if (!err) {
-    int level = g_strv_length(parent);
-    GError *error = NULL;
-    
-    if (level == 1) {
-      create_schema(g_path_get_basename(path), &error);
-    }
+  
+  GError *terr = NULL;
+  
+  create_dir(path, &terr);
+  
+  if (terr != NULL) {
+    if (terr->code == EENOTSUP)
+      err = -ENOTSUP;
     else
-      if (level == 2)
-	create_table(*parent, g_path_get_basename(path), &error);
-      else
-	err = -ENOTSUP;
-    
-    if (error != NULL)
       err = -EFAULT;
+  }
+  
+  if (terr != NULL)
+    g_error_free(terr);
 
-    if (error != NULL)
-      g_error_free(error);
-  }
-  
-  if (g_strv_length(parent) > 0) {
-    g_strfreev(parent);
-  }
-  
   return err;
 }
 
 static int sqlfs_rmdir(const char *path)
 {
   int err = 0;
-  
-  gchar **parent = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
-  if (parent == NULL)
+  GError *terr = NULL;
+
+  remove_object(path, &terr);
+
+  if (terr != NULL)
     err = -EFAULT;
-  
-  if (!err) {
-    GError *terr = NULL;
-    int level = g_strv_length(parent);
-    struct sqlfs_ms_obj *object = find_object(path, &terr);
-    if (terr != NULL) {
-      if (terr->code == EENOTFOUND) {
-	err = -ENOENT;
-      }
-      else {
-	err = -EFAULT;
-      }
-    }
-    else {
-      if (level > 2)
-	err = -EPERM;
 
-      if (!err)
-	remove_ms_object(*parent, *(parent + 1), object, &terr);
-    
-      if (terr != NULL)
-	err = -EFAULT;
-    }
-
-    if (terr != NULL)
-      g_error_free(terr);
-    
-    SAFE_REMOVE_ALL(path);
-  }
-  
-  if (g_strv_length(parent) > 0) {
-    g_strfreev(parent);
-  }
+  if (terr != NULL)
+    g_error_free(terr);
 
   return err;
 }
@@ -409,30 +240,18 @@ static int sqlfs_mknod(const char *path, mode_t mode, dev_t rdev)
 
   if ((mode & S_IFMT) != S_IFREG)
     return -EPERM;
-  
-  gchar **parent = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
-  if (parent == NULL)
+
+  GError *terr = NULL;
+  create_node(path, &terr);
+
+  sqlfs_chmod(path, mode);
+
+  if (terr != NULL)
     err = -EFAULT;
 
-  if (!err) {
-    struct sqlfs_ms_obj *tobj = g_try_new0(struct sqlfs_ms_obj, 1);
-    tobj->object_id = 0;
-    tobj->name = g_path_get_basename(path);
-    tobj->type = R_TEMP;
+  if (terr != NULL)
+    g_error_free(terr);
     
-    g_mutex_lock(&cache.m);
-    g_hash_table_insert(cache.temp_table, g_strdup(path), tobj);
-    g_mutex_unlock(&cache.m);
-    
-    sqlfs_chmod(path, mode);
-    
-    err = 0;
-  }
-  
-  if (g_strv_length(parent) > 0) {
-    g_strfreev(parent);
-  }
-  
   return err;
 }
 
@@ -441,7 +260,7 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
   int err = 0;
 
   GError *terr = NULL;
-  struct sqlfs_ms_obj *object = find_object(path, &terr);
+  struct sqlfs_object *object = find_object(path, &terr);
   if (terr != NULL && terr->code == EENOTFOUND) {
     err = -ENOENT;
   }
@@ -466,21 +285,8 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
 
   if (!err) {
     fi->fh = object->object_id;
-    gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
-    if (schema == NULL)
-      err = -EFAULT;
 
-    char *def = NULL;
-    if (object->object_id != 0) {
-      if (!g_hash_table_contains(cache.temp_table, path))
-	def = load_module_text(*schema, object, &terr);
-      else
-	def = object->def;
-    }
-    else {
-      def = g_strdup("\0");
-    }
-    
+    char *def = fetch_object_text(path, &terr);
     if (def != NULL) {
       sqlfs_file_t *fsfile = g_try_new0(sqlfs_file_t, 1);
       uint64_t *pfh = g_malloc0(sizeof(uint64_t));
@@ -491,7 +297,8 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
       g_hash_table_insert(cache.open_table, pfh, fsfile);
     }
 
-    g_strfreev(schema);
+    if (object != NULL)
+      free_sqlfs_object(object);
   }
 
   if (terr != NULL)
@@ -526,27 +333,13 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
   sqlfs_file_t *fsfile = g_hash_table_lookup(cache.open_table, &(fi->fh));
   if (!fsfile)
     return err;
-  
-  gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
-  if (schema == NULL)
-    err = -EFAULT;
 
   if (!err) {
     GError *terr = NULL;
-    gchar *pp = g_path_get_dirname(path);
-    struct sqlfs_ms_obj *pobj = find_object(pp, &terr),
-      *obj = find_object(path, &terr);
-
-    if (terr != NULL && terr->code == EENOTFOUND) {
-      g_clear_error(&terr);
-      obj->name = g_path_get_basename(path);
-    }
 
     if (fsfile->flush == TRUE && strlen(fsfile->buffer) > 0) {
-      write_ms_object(*schema, pobj, fsfile->buffer, obj, &terr);
+      write_object(path, fsfile->buffer, &terr);
       fsfile->flush = FALSE;
-
-      SAFE_REMOVE_ALL(path);
     }
 
     if (terr != NULL)
@@ -554,13 +347,8 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
 
     if (terr != NULL)
       g_error_free(terr);
-    
-    g_free(pp);
   }
 
-  if (schema != NULL)
-    g_strfreev(schema);
-  
   return err;
 }
 
@@ -577,40 +365,20 @@ static int sqlfs_release(const char *path, struct fuse_file_info *fi)
 static int sqlfs_unlink(const char *path)
 {
   int err = 0;
-  gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
-  if (schema == NULL)
-    err = -EFAULT; 
-
-  if (!err) {
-    GError *terr = NULL;
-    struct sqlfs_ms_obj *object = find_object(path, &terr);
-    if (terr != NULL) {
-      if (terr->code == EENOTFOUND) {
-	err = -ENOENT;
-      }
-      else {
-	err = -EFAULT;
-      }
+  GError *terr = NULL;
+  remove_object(path, &terr);
+  if (terr != NULL) {
+    if (terr->code == EENOTFOUND) {
+      err = -ENOENT;
     }
     else {
-      remove_ms_object(*schema, *(schema + 1), object, &terr);
-	
-      if (terr != NULL && !g_hash_table_contains(cache.temp_table, path))
-	err = -EFAULT;
-
+      err = -EFAULT;
     }
-    
-    SAFE_REMOVE_ALL(path);
-
-    if (terr != NULL)
-      g_error_free(terr);
-    
   }
-
-  if (g_strv_length(schema) > 0) {
-    g_strfreev(schema);
-  }
-
+  
+  if (terr != NULL)
+    g_error_free(terr);
+  
   return err;
 }
 
@@ -620,182 +388,45 @@ static int sqlfs_truncate(const char *path, off_t offset)
   int err = 0;
   GError *terr = NULL;
 
-  struct sqlfs_ms_obj *obj = g_hash_table_lookup(cache.temp_table, path);
-  if (!obj) {
-    obj = find_object(path, &terr);
-    if (terr != NULL) {
-      if (terr->code == EENOTFOUND) {
-	err = -ENOENT;
-      }
-      else {
-	err = -EFAULT;
-      }
-    } else {
-      g_hash_table_steal(cache.cache_table, path);
-    }
-  }
-
-  if (obj != NULL && !err) {
-    gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
-    char *def = NULL;
-    if (obj->object_id != 0) {
-      def = g_strndup(load_module_text(*schema, obj, &terr), offset);
-    }
-    else
-      if (obj->def != NULL) {
-	def = g_strndup(obj->def, offset);
-      }
-
-    if (obj->def != NULL)
-      g_free(obj->def);
-
-    if (offset > 0 && def != NULL) {
-      obj->def = def;
-      obj->len = strlen(obj->def);
+  truncate_object(path, offset, &terr);
+  
+  if (terr != NULL) {
+    if (terr->code == EENOTFOUND) {
+      err = -ENOENT;
     }
     else {
-      obj->def = g_strdup("\0");
-      obj->len = 0;
-    }
-
-    if (!g_hash_table_contains(cache.temp_table, path)) {
-      g_mutex_lock(&cache.m);
-      g_hash_table_insert(cache.temp_table, g_strdup(path), obj);
-      g_mutex_unlock(&cache.m);
-    }
-
-    if (g_strv_length(schema) > 0) {
-      g_strfreev(schema);
+      err = -EFAULT;
     }
   }
-
+  
   if (terr != NULL)
     g_error_free(terr);
   
   return err;
 }
 
-static inline void do_rename(const char *oldname, const char *newname,
-			     gchar **schemaold, gchar **schemanew, GError **error)
-{
-  GError *terr = NULL;
-  gchar *ppold = g_path_get_dirname(oldname);
-  
-  struct sqlfs_ms_obj
-    *ppobj_old = find_object(ppold, &terr),
-    *obj_old = find_object(oldname, &terr),
-    *obj_new = g_try_new0(struct sqlfs_ms_obj, 1);
-  
-  if (terr == NULL) {
-    obj_old->name = g_path_get_basename(oldname);
-    obj_new->name = g_path_get_basename(newname);
-    
-    if (!g_hash_table_contains(cache.temp_table, oldname)) {
-      rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,
-		       ppobj_old, &terr);
-      
-      if (terr == NULL) {
-	SAFE_REMOVE_ALL(oldname);
-      }
-      
-    } else {
-      obj_old->name = g_strdup(obj_new->name);
-      g_mutex_lock(&cache.m);
-      g_hash_table_steal(cache.temp_table, oldname);
-      g_hash_table_insert(cache.temp_table, g_strdup(newname), obj_old);
-      g_mutex_unlock(&cache.m);
-    }
-    
-  }
-  
-  if (terr != NULL)
-    g_propagate_error(error, terr);
-  
-  g_free(ppold);
-  free_ms_obj(obj_new);
-}
 
 static int sqlfs_rename(const char *oldname, const char *newname)
 {
-  gchar **schemaold = g_strsplit(g_path_skip_root(oldname),
-				 G_DIR_SEPARATOR_S, -1);
-  gchar **schemanew = g_strsplit(g_path_skip_root(newname),
-				 G_DIR_SEPARATOR_S, -1);
-  
+  GError *terr = NULL;
   int err = 0;
-
-  if (g_strv_length(schemanew) == 1)
-    err = -ENOTSUP;
   
-  if (g_strv_length(schemaold) != g_strv_length(schemanew))
-    err = -ENOTSUP;
-
-  if (g_strv_length(schemanew) > 2
-      && g_strcmp0(*(schemanew + 1), *(schemaold + 1)))
-    err = -ENOTSUP;
-  
-  if (!err) {
-    GError *terr = NULL;
-    
-    struct sqlfs_ms_obj *obj_new = find_object(newname, &terr);
-    if (terr == NULL) {
-      if (g_hash_table_contains(cache.temp_table, newname)) {
-	g_hash_table_remove(cache.temp_table, newname);
-	do_rename(oldname, newname, schemaold, schemanew, &terr);
-	
-	if (terr != NULL)
-	  err = -EFAULT;
-      }
-      else {
-	struct sqlfs_ms_obj *obj_old = find_object(oldname, &terr);
-	if (g_hash_table_contains(cache.temp_table, oldname)) {
-	  obj_old->name = g_strdup(obj_new->name);
-	  g_mutex_lock(&cache.m);
-	  g_hash_table_steal(cache.temp_table, oldname);
-	  g_hash_table_insert(cache.temp_table, g_strdup(newname), obj_old);
-	  g_mutex_unlock(&cache.m);
-	}
-	else {	    
-	  char *def = load_module_text(*schemaold, obj_old, &terr);
-	  if (terr == NULL) {
-	    gchar *ppnew = g_path_get_dirname(newname);
-	    
-	    g_free(obj_old->name);
-	    obj_old->name = g_strdup(obj_new->name);
-	    
-	    struct sqlfs_ms_obj *ppobj_new = find_object(ppnew, &terr);
-	    write_ms_object(*schemanew, ppobj_new, def, obj_old, &terr);
-	    g_free(ppnew);
-
-	    if (terr != NULL)
-	      err = -EFAULT;
-	  }
-	  else
-	    err = -EFAULT;
-	}
-	
-	SAFE_REMOVE_ALL(oldname);
-      }
+  rename_object(oldname, newname, &terr);
+  if (terr != NULL) {
+    switch(terr->code) {
+    case EENOTFOUND:
+      err = -ENOENT;
+      break;
+    case EENOTSUP:
+      err = -ENOTSUP;
+      break;
+    default:
+      err = -EFAULT;
     }
-    else {
-      g_clear_error(&terr);
-      
-      if (g_hash_table_contains(cache.temp_table, newname))
-	g_hash_table_remove(cache.temp_table, newname);
-
-      do_rename(oldname, newname, schemaold, schemanew, &terr);
-
-      if (terr != NULL)
-	err = -EFAULT;
-      
-    }
-
-    if (terr != NULL)
-      g_error_free(terr);
   }
-  
-  g_strfreev(schemanew);
-  g_strfreev(schemaold);
+ 
+  if (terr != NULL)
+    g_error_free(terr);
   
   return err;
 }
@@ -845,10 +476,7 @@ int main (int argc, char **argv)
   struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
   sqlprofile = g_try_new0(struct sqlprofile, 1);
   g_mutex_init(&cache.m);
-  cache.cache_table = g_hash_table_new_full(g_str_hash, g_str_equal,
-				      g_free, free_ms_obj);
-  cache.temp_table = g_hash_table_new_full(g_str_hash, g_str_equal,
-				      g_free, free_ms_obj);
+  
   cache.open_table = g_hash_table_new_full(g_int64_hash, g_int64_equal,
 					   g_free, free_sqlfs_file);
 
@@ -863,7 +491,7 @@ int main (int argc, char **argv)
       res = 1;
     
     if (!res) {
-      init_msctx(&terr);
+      init_cache(&terr);
       
       if (terr != NULL)
 	res = 2;
@@ -878,7 +506,7 @@ int main (int argc, char **argv)
     }
 
     if (!res || res > 2)
-      close_msctx(&terr);
+      destroy_cache(&terr);
 
     if (!res || res > 1)
       close_keyfile();
@@ -895,8 +523,6 @@ int main (int argc, char **argv)
       g_error_free(terr);
   }
 
-  g_hash_table_destroy(cache.cache_table);
-  g_hash_table_destroy(cache.temp_table);
   g_hash_table_destroy(cache.open_table);
   
   g_mutex_clear(&cache.m);

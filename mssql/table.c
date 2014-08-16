@@ -17,7 +17,7 @@
   along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "mssqlfs.h"
+#include "msctx.h"
 #include "table.h"
 #include "exec.h"
 #include "util.h"
@@ -195,7 +195,7 @@ GList * fetch_columns(int tid, const char *name, GError **error)
 	struct sqlfs_ms_obj *obj = g_try_new0(struct sqlfs_ms_obj, 1);
 	
 	obj->object_id = col_id_buf;
-	obj->name = g_strdup(trimwhitespace(colname_buf));
+	obj->name = g_strdup(g_strchomp(colname_buf));
 	obj->type = R_COL;
 	obj->parent_id = tid;
 	
@@ -208,10 +208,10 @@ GList * fetch_columns(int tid, const char *name, GError **error)
 	obj->column->precision = precision;
 	obj->column->nullable = nullable;
 	obj->column->ansi = ansi;
-	obj->column->type_name = g_strdup(trimwhitespace(typename_buf));
+	obj->column->type_name = g_strdup(g_strchomp(typename_buf));
 	if (identity == TRUE) {
-	  obj->column->seed_val = g_strdup(trimwhitespace(seed_val));
-	  obj->column->inc_val = g_strdup(trimwhitespace(inc_val));
+	  obj->column->seed_val = g_strdup(g_strchomp(seed_val));
+	  obj->column->inc_val = g_strdup(g_strchomp(inc_val));
 	  obj->column->not4repl = not4repl;
 	}
 	obj->def = make_column_def(obj);
@@ -285,11 +285,11 @@ GList * fetch_modules(int tid, const char *name, GError **error)
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
-	trgname_buf = trimwhitespace(trgname_buf);
+	trgname_buf = g_strchomp(trgname_buf);
 	trgobj = g_try_new0(struct sqlfs_ms_obj, 1);
 	trgobj->object_id = trg_id_buf;
 	trgobj->name = g_strdup(trgname_buf);
-	trgobj->type = str2mstype(trimwhitespace(type_buf));
+	trgobj->type = str2mstype(g_strchomp(type_buf));
 	trgobj->parent_id = tid;
 	trgobj->ctime = cdate_buf;
 	trgobj->mtime = mdate_buf;
@@ -419,21 +419,21 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
 	obj = g_try_new0(struct sqlfs_ms_obj, 1);
 	obj->object_id = obj_id;
 	obj->parent_id = tid;
-	obj->name = g_strdup(trimwhitespace(csnt_name));
+	obj->name = g_strdup(g_strchomp(csnt_name));
 	obj->mtime = mdate_buf;
 	obj->ctime = cdate_buf;
-	obj->type = str2mstype(trimwhitespace(type_buf));
+	obj->type = str2mstype(g_strchomp(type_buf));
 
 	obj->clmn_ctrt =  g_try_new0(struct sqlfs_ms_constraint, 1);
 
 	if (obj->type == R_D)
-	  obj->clmn_ctrt->column_name = g_strdup(trimwhitespace(clmn_name));
+	  obj->clmn_ctrt->column_name = g_strdup(g_strchomp(clmn_name));
 	else {
 	  obj->clmn_ctrt->disabled = disabled;
 	  obj->clmn_ctrt->not4repl = not4repl;
 	}
 	
-	obj->def = make_constraint_def(obj, trimwhitespace(def_text));
+	obj->def = make_constraint_def(obj, g_strchomp(def_text));
 	obj->len = strlen(obj->def);
 
 	obj->cached_time = g_get_monotonic_time();

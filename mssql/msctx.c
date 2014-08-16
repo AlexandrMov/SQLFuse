@@ -18,7 +18,7 @@
 */
 
 #include <conf/keyconf.h>
-#include "mssqlfs.h"
+#include "msctx.h"
 #include "util.h"
 #include "exec.h"
 #include "tsqlcheck.h"
@@ -583,10 +583,10 @@ GList * fetch_schema_obj(int schema_id, const char *name,
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
-	name_buf = trimwhitespace(name_buf);
+	name_buf = g_strchomp(name_buf);
 	struct sqlfs_ms_obj *obj = g_try_new0(struct sqlfs_ms_obj, 1);
 	obj->name = g_strdup(name_buf);
-	obj->type = str2mstype(trimwhitespace(type_buf));
+	obj->type = str2mstype(g_strchomp(type_buf));
 	obj->schema_id = schema_id;
 	obj->object_id = obj_id_buf;
 	obj->ctime = cdate_buf;

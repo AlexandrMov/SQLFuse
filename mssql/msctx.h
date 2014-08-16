@@ -20,12 +20,12 @@
 #ifndef MSSQLFS_H
 #define MSSQLFS_H
 
-#include <stdlib.h>
-
 #include <sybdb.h>
 #include <sybfront.h>
 
 #include <glib.h>
+
+#include <sqlfuse.h>
 
 #define D_SCHEMA 0x01
 #define D_IT 0x02
@@ -60,21 +60,6 @@
 
 #define D_TEMP 0x11
 #define R_TEMP 0x99
-
-#define EENULL 0x101
-#define EENOTSUP 0x102
-#define EEMEM 0x109
-#define EELOGIN 0x110
-#define EECONN 0x111
-#define EEUSE 0x112
-#define EEINIT 0x113
-#define EEBUSY 0x114
-#define EECMD 0x121
-#define EEXEC 0x122
-#define EERES 0x123
-#define EEFULL 0x124
-#define EENOTFOUND 0x221
-#define EEPARSE 0x222
 
 struct sqlfs_ms_type {
   int sys_type_id;

@@ -17,13 +17,10 @@
   along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef CACHE_H
-#define CACHE_H
+#ifndef MSSQL_H
+#define MSSQL_H
 
 #include <glib.h>
-
-#define SF_DIR 0x01
-#define SF_REG 0x02
 
 struct sqlfs_object {
   gchar *name;
@@ -78,8 +75,7 @@ char * fetch_object_text(const char *path, GError **error);
 /*
  * Записать модуль
  */
-void write_object(const char *path, struct sqlfs_object *object,
-		  int mode, GError **error);
+void write_object(const char *path, const char *buffer, GError **error);
 
 
 /*
@@ -89,9 +85,21 @@ void rename_object(const char *oldpath, const char *newpath, GError **error);
 
 
 /*
+ * Обрезать текст модуля
+ */
+void truncate_object(const char *path, off_t offset, GError **error);
+
+
+/*
  * Удалить объект
  */
 void remove_object(const char *path, GError **error);
+
+
+/*
+ * Освободить занимаемую память
+ */
+void free_sqlfs_object(gpointer object);
 
 
 /*
