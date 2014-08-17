@@ -55,6 +55,8 @@ static void load_from_file(GKeyFile *keyfile, const char *group, GError **error)
   ADD_KEYVAL(sqlctx->defcol, "default_column");
   ADD_KEYBOOL(sqlctx->merge_names, "merge_names");
 
+  ADD_KEYINT(sqlctx->depltime, "deploy_time");
+
   if (g_key_file_has_key(keyfile, group, "auth", &terr))
     sqlctx->auth = g_key_file_get_value(keyfile, group, "auth", &terr);
   else {
@@ -113,7 +115,7 @@ sqlctx_t * fetch_context(gboolean load_auth, GError **error)
 
   if (sqlctx->maxconn < 1)
     sqlctx->maxconn = 1;
-  
+
   if (load_auth && sqlctx->auth) {
     GError *terr = NULL;
     GKeyFile *keyfile = g_key_file_new();

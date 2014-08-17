@@ -1,4 +1,5 @@
 #include <sqlfuse.h>
+#include <conf/keyconf.h>
 #include "msctx.h"
 
 #include <string.h>
@@ -6,8 +7,16 @@
 struct sqlcache {
   GMutex m;
   
-  GHashTable *db_table, *app_table, *act_table;
+  GHashTable *db_table, *app_table;
 };
+
+struct sqldeploy {
+  GCond cond;
+  GMutex lock;
+  GTimer *timer;
+  GSequence *sql_seq;
+};
+
 
 enum action {
   CREP,
@@ -15,8 +24,8 @@ enum action {
   RENAME
 };
 
-struct cache_oper {
-  enum action cache_action;
+struct sql_cmd {
+  enum action act;
   char *path;
   unsigned int objtype;
   char *buffer;
@@ -31,6 +40,7 @@ struct cache_oper {
   g_mutex_unlock(&cache.m);
 
 static struct sqlcache cache;
+static struct sqldeploy deploy;
 
 static struct sqlfs_ms_obj * find_cache_obj(const char *pathname, GError **error)
 {
@@ -138,8 +148,8 @@ static struct sqlfs_object * ms2sqlfs(struct sqlfs_ms_obj *src)
   return result;
 }
 
-static inline void do_rename(const char *oldname, const char *newname,
-			     gchar **schemaold, gchar **schemanew, GError **error)
+static void do_rename(const char *oldname, const char *newname,
+		      gchar **schemaold, gchar **schemanew, GError **error)
 {
   GError *terr = NULL;
   gchar *ppold = g_path_get_dirname(oldname);
@@ -178,6 +188,82 @@ static inline void do_rename(const char *oldname, const char *newname,
   free_ms_obj(obj_new);
 }
 
+static void add2deploy(enum action act, const char *path,
+		       unsigned int objtype, const char *buffer)
+{
+  g_mutex_lock(&deploy.lock);
+  
+  struct sql_cmd *cmd = g_try_new0(struct sql_cmd, 1);
+  cmd->path = g_strdup(path);
+  cmd->objtype = objtype;
+  
+  if (buffer != NULL)
+    cmd->buffer = g_strdup(buffer);
+
+  cmd->act = act;
+  g_sequence_append(deploy.sql_seq, cmd);
+
+  g_timer_start(deploy.timer);
+
+  g_cond_signal(&deploy.cond);
+  g_mutex_unlock(&deploy.lock);
+}
+
+static inline void do_deploy_sql()
+{
+  GSequenceIter *iter = g_sequence_get_begin_iter(deploy.sql_seq);
+  while(!g_sequence_iter_is_end(iter)) {
+    struct sql_cmd *cmd = g_sequence_get(iter);
+    iter = g_sequence_iter_next(iter);
+  }
+
+  g_sequence_remove_range(g_sequence_get_begin_iter(deploy.sql_seq),
+			  g_sequence_get_end_iter(deploy.sql_seq));
+}
+
+
+static gpointer deploy_thread(gpointer data) {
+  while (TRUE) {
+    g_mutex_lock(&deploy.lock);
+    
+    while(!g_sequence_get_length(deploy.sql_seq)) {
+      g_cond_wait(&deploy.cond, &deploy.lock);
+    }
+
+    g_mutex_unlock(&deploy.lock);
+
+    gdouble tm = g_timer_elapsed(deploy.timer, NULL);
+    if (tm > get_context()->depltime) {
+      g_mutex_lock(&deploy.lock);
+      do_deploy_sql();
+      g_mutex_unlock(&deploy.lock);
+      g_timer_stop(deploy.timer);
+    }
+    else {
+      g_usleep((get_context()->depltime - tm) * 1000000);
+    }
+  }
+  
+  return 0;
+}
+
+static void free_sqlcmd_object(gpointer object)
+{
+  if (object == NULL)
+    return ;
+
+  struct sql_cmd *obj = (struct sql_cmd *) object;
+
+  if (obj->path != NULL)
+    g_free(obj->path);
+
+  if (obj->buffer != NULL)
+    g_free(obj->buffer);
+
+  if (obj != NULL)
+    g_free(obj);
+}
+
 
 void init_cache(GError **error)
 {
@@ -188,6 +274,13 @@ void init_cache(GError **error)
 					 g_free, free_ms_obj);
   cache.app_table = g_hash_table_new_full(g_str_hash, g_str_equal,
 					  g_free, free_ms_obj);
+
+  g_mutex_init(&deploy.lock);
+  g_cond_init(&deploy.cond);
+  deploy.sql_seq = g_sequence_new(&free_sqlcmd_object);
+  deploy.timer = g_timer_new();
+  g_thread_new(NULL, &deploy_thread, NULL);
+  
   init_msctx(&terr);
   
   if (terr != NULL)
@@ -326,11 +419,14 @@ void create_dir(const char *pathdir, GError **error)
     int level = g_strv_length(parent);
   
     if (level == 1) {
+      add2deploy(CREP, pathdir, D_SCHEMA, NULL);
       create_schema(g_path_get_basename(pathdir), &terr);
     }
     else
-      if (level == 2)
+      if (level == 2) {
+	add2deploy(CREP, pathdir, D_U, NULL);
 	create_table(*parent, g_path_get_basename(pathdir), &terr);
+      }
       else
 	g_set_error(&terr, EENOTSUP, EENOTSUP,
 		    "%d: Operation not supported", __LINE__);
@@ -394,8 +490,10 @@ void write_object(const char *path, const char *buffer, GError **error)
       object->name = g_path_get_basename(path);
     }
 
-    if (object && object->def && strlen(object->def) > 0)
+    if (object && buffer && strlen(buffer) > 0) {
+      add2deploy(CREP, path, object->type, buffer);
       write_ms_object(*schema, pobj, buffer, object, &terr);
+    }
 
     SAFE_REMOVE_ALL(path);
 
@@ -451,6 +549,8 @@ void truncate_object(const char *path, off_t offset, GError **error)
       g_mutex_unlock(&cache.m);
     }
 
+    add2deploy(CREP, path, obj->type, obj->def);
+
     if (g_strv_length(schema) > 0) {
       g_strfreev(schema);
     }
@@ -473,6 +573,7 @@ void remove_object(const char *path, GError **error)
   if (terr == NULL) {
     struct sqlfs_ms_obj *object = find_cache_obj(path, &terr);
     if (terr == NULL) {
+      add2deploy(DROP, path, object->type, NULL);
       remove_ms_object(*schema, *(schema + 1), object, &terr);      
     }
     
@@ -513,6 +614,7 @@ void rename_object(const char *oldname, const char *newname, GError **error)
 		"%d: Operation not supported", __LINE__);
   
   if (terr == NULL) {
+    add2deploy(RENAME, oldname, 0, newname);
     struct sqlfs_ms_obj *obj_new = find_cache_obj(newname, &terr);
     if (terr == NULL) {
       if (g_hash_table_contains(cache.app_table, newname)) {
@@ -590,8 +692,13 @@ void destroy_cache(GError **error)
   
   g_hash_table_destroy(cache.db_table);
   g_hash_table_destroy(cache.app_table);
+  g_sequence_free(deploy.sql_seq);
+  g_timer_destroy(deploy.timer);
 
   g_mutex_clear(&cache.m);
+  g_mutex_clear(&deploy.lock);
+  g_cond_clear(&deploy.cond);
+  
   
   if (terr != NULL)
     g_propagate_error(error, terr);

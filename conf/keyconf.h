@@ -35,7 +35,7 @@ typedef struct {
 
   char *defcol;
   
-  int maxconn, debug;
+  int maxconn, debug, depltime, maxdepl;
 } sqlctx_t;
 
 /*
