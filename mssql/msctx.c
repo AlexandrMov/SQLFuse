@@ -367,7 +367,6 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
   if (!terr) {
     g_string_truncate(sql, 0);
     
-    struct sqlfs_ms_module * module = NULL;
     DBCHAR def_buf[256];
     dbbind(ctx->dbproc, 1, NTBSTRINGBIND, (DBINT) 0, (BYTE *) def_buf);
     int rowcode;
@@ -399,15 +398,15 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
     }
       
     if (!terr) {
-      module = g_try_new0(struct sqlfs_ms_module, 1);
-      obj->sql_module = module;
-
       /* FIXME: #23 */
       if (obj->len > strlen(sql->str)) {
 	char *nlspc = g_strnfill(obj->len - strlen(sql->str), ' ');
 	g_string_append_printf(sql, nlspc);
 	g_free(nlspc);
       }
+
+      if (obj->def != NULL)
+	g_free(obj->def);
       
       obj->def = g_strdup(sql->str);
       obj->len = strlen(obj->def);

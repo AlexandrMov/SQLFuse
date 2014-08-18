@@ -30,8 +30,14 @@ struct context *keyctx;
 #define ADD_KEYVAR(v, p, t)				\
   if (g_key_file_has_key(keyfile, group, p, &terr))	\
     v = g_key_file_get_##t(keyfile, group, p, &terr);	\
-  
-#define ADD_KEYVAL(v, p) ADD_KEYVAR(v, p, value)
+    
+#define ADD_KEYVAL(v, p)				\
+  if (g_key_file_has_key(keyfile, group, p, &terr)) {	\
+    if (v != NULL)					\
+      g_free(v);					\
+    v = g_key_file_get_value(keyfile, group, p, &terr);	\
+  }
+
 #define ADD_KEYBOOL(v, p) ADD_KEYVAR(v, p, boolean)
 #define ADD_KEYINT(v, p) ADD_KEYVAR(v, p, integer)
 
@@ -51,7 +57,7 @@ static void load_from_file(GKeyFile *keyfile, const char *group, GError **error)
   ADD_KEYVAL(sqlctx->from_codeset, "from_codeset");
 
   ADD_KEYBOOL(sqlctx->ansi_npw, "ansi_npw");
-  
+
   ADD_KEYVAL(sqlctx->defcol, "default_column");
   ADD_KEYBOOL(sqlctx->merge_names, "merge_names");
 

@@ -14,6 +14,8 @@ struct sqldeploy {
   GCond cond;
   GMutex lock;
   GTimer *timer;
+  volatile int run;
+  GThread *thread;
   GSequence *sql_seq;
 };
 
@@ -214,6 +216,7 @@ static inline void do_deploy_sql()
   GSequenceIter *iter = g_sequence_get_begin_iter(deploy.sql_seq);
   while(!g_sequence_iter_is_end(iter)) {
     struct sql_cmd *cmd = g_sequence_get(iter);
+    g_message("Deploy: %s", cmd->path);
     iter = g_sequence_iter_next(iter);
   }
 
@@ -223,27 +226,30 @@ static inline void do_deploy_sql()
 
 
 static gpointer deploy_thread(gpointer data) {
-  while (TRUE) {
+  while (deploy.run) {
     g_mutex_lock(&deploy.lock);
     
-    while(!g_sequence_get_length(deploy.sql_seq)) {
+    while(!g_sequence_get_length(deploy.sql_seq) && deploy.run) {
       g_cond_wait(&deploy.cond, &deploy.lock);
     }
 
-    g_mutex_unlock(&deploy.lock);
+    if (!deploy.run) {
+      g_mutex_unlock(&deploy.lock);
+      break;
+    }
 
     gdouble tm = g_timer_elapsed(deploy.timer, NULL);
     if (tm > get_context()->depltime) {
-      g_mutex_lock(&deploy.lock);
       do_deploy_sql();
-      g_mutex_unlock(&deploy.lock);
       g_timer_stop(deploy.timer);
+      g_mutex_unlock(&deploy.lock);
     }
     else {
+      g_mutex_unlock(&deploy.lock);
       g_usleep((get_context()->depltime - tm) * 1000000);
     }
   }
-  
+
   return 0;
 }
 
@@ -279,7 +285,8 @@ void init_cache(GError **error)
   g_cond_init(&deploy.cond);
   deploy.sql_seq = g_sequence_new(&free_sqlcmd_object);
   deploy.timer = g_timer_new();
-  g_thread_new(NULL, &deploy_thread, NULL);
+  deploy.run = 1;
+  deploy.thread = g_thread_new(NULL, &deploy_thread, NULL);
   
   init_msctx(&terr);
   
@@ -687,6 +694,13 @@ void free_sqlfs_object(gpointer object)
 void destroy_cache(GError **error)
 {
   GError *terr = NULL;
+
+  g_mutex_lock(&deploy.lock);
+  deploy.run = 0;
+  g_cond_signal(&deploy.cond);
+  g_mutex_unlock(&deploy.lock);
+
+  g_thread_join(deploy.thread);
   
   close_msctx(&terr);
   
@@ -694,7 +708,7 @@ void destroy_cache(GError **error)
   g_hash_table_destroy(cache.app_table);
   g_sequence_free(deploy.sql_seq);
   g_timer_destroy(deploy.timer);
-
+  
   g_mutex_clear(&cache.m);
   g_mutex_clear(&deploy.lock);
   g_cond_clear(&deploy.cond);

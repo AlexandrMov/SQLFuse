@@ -31,7 +31,7 @@ exectx_t *ectx;
 
 static inline char * get_npw_sql()
 {
-  char *result = NULL;
+  char *result;
   GString *sql = g_string_new(NULL);
   
   g_string_append(sql, "SET ANSI_NULLS ON;\n");
@@ -113,9 +113,9 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
     }
     
     int i;
-    msctx_t *msctx = NULL;    
+    char *npw_sql = get_npw_sql();
     for (i = 0; i < sqlctx->maxconn; i++) {
-      msctx = g_try_new0(msctx_t, 1);
+      msctx_t *msctx = g_try_new0(msctx_t, 1);
     
       if ((msctx->login = dblogin()) == NULL) {
 	g_set_error(&terr, EELOGIN, EELOGIN,
@@ -145,7 +145,7 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
       }
 
       if (terr == NULL && sqlctx->ansi_npw == TRUE)
-	do_exec_sql(get_npw_sql(), msctx, &terr);
+	do_exec_sql(npw_sql, msctx, &terr);
 
       if (terr == NULL) {
 	g_mutex_init(&msctx->lock);
@@ -155,6 +155,9 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
 	g_free(msctx);
       }
     }
+    
+    g_free(npw_sql);
+    
   }
   
   if (terr != NULL)
@@ -169,6 +172,7 @@ msctx_t * exec_sql(const char *sql, GError **error)
   msctx_t *wrkctx = NULL;
   GError *terr = NULL;
   RETCODE erc;
+  char *npw_sql = get_npw_sql();
 	
   for (i = 0; i < len; i++) {
     wrkctx = list->data;
@@ -198,7 +202,7 @@ msctx_t * exec_sql(const char *sql, GError **error)
 	}
 
 	if (sqlctx->ansi_npw == TRUE && terr == NULL
-	    && do_exec_sql(get_npw_sql(), wrkctx, &terr)) {
+	    && do_exec_sql(npw_sql, wrkctx, &terr)) {
 	  g_set_error(&terr, EEXEC, EEXEC,
 		      "%s:%d: unable sets init params NPW\n",
 		      sqlctx->appname, __LINE__);
@@ -240,6 +244,8 @@ msctx_t * exec_sql(const char *sql, GError **error)
     }
 
   }
+
+  g_free(npw_sql);
 
   if (terr != NULL)
     g_propagate_error(error, terr);
