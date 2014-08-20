@@ -26,11 +26,13 @@ enum action {
   RENAME
 };
 
-struct sql_cmd {
+struct sqlcmd {
   enum action act;
-  char *path;
-  unsigned int objtype;
-  char *buffer;
+  char *path, *path2;
+
+  struct sqlfs_object *obj;
+  
+  char *sql;
 };
 
 #define SAFE_REMOVE_ALL(p)						\
@@ -130,7 +132,8 @@ static struct sqlfs_ms_obj * find_cache_obj(const char *pathname, GError **error
 static struct sqlfs_object * ms2sqlfs(struct sqlfs_ms_obj *src)
 {
   struct sqlfs_object *result = g_try_new0(struct sqlfs_object, 1);
-
+  g_rw_lock_init(&result->lock);
+  
   result->object_id = src->object_id;
   result->name = g_strdup(src->name);
   
@@ -190,17 +193,20 @@ static void do_rename(const char *oldname, const char *newname,
   free_ms_obj(obj_new);
 }
 
-static void add2deploy(enum action act, const char *path,
-		       unsigned int objtype, const char *buffer)
+
+static void add2deploy(enum action act, const char *path, const char *path2,
+		       struct sqlfs_object *obj, const char *sql)
 {
   g_mutex_lock(&deploy.lock);
   
-  struct sql_cmd *cmd = g_try_new0(struct sql_cmd, 1);
+  struct sqlcmd *cmd = g_try_new0(struct sqlcmd, 1);
   cmd->path = g_strdup(path);
-  cmd->objtype = objtype;
+  cmd->path2 = g_strdup(path2);
+
+  cmd->obj = obj;
   
-  if (buffer != NULL)
-    cmd->buffer = g_strdup(buffer);
+  if (sql != NULL)
+    cmd->sql = g_strdup(sql);
 
   cmd->act = act;
   g_sequence_append(deploy.sql_seq, cmd);
@@ -211,11 +217,22 @@ static void add2deploy(enum action act, const char *path,
   g_mutex_unlock(&deploy.lock);
 }
 
+static inline void dir2deploy(enum action act, const char *path,
+			      unsigned int objtype)
+{
+  struct sqlfs_object *res = g_try_new0(struct sqlfs_object, 1);
+  res->type = objtype;
+  res->cached_time = g_get_monotonic_time();
+
+  add2deploy(act, path, NULL, res, NULL);
+}
+
+
 static inline void do_deploy_sql()
 {
   GSequenceIter *iter = g_sequence_get_begin_iter(deploy.sql_seq);
   while(!g_sequence_iter_is_end(iter)) {
-    struct sql_cmd *cmd = g_sequence_get(iter);
+    struct sqlcmd *cmd = g_sequence_get(iter);
     g_message("Deploy: %s", cmd->path);
     iter = g_sequence_iter_next(iter);
   }
@@ -258,13 +275,19 @@ static void free_sqlcmd_object(gpointer object)
   if (object == NULL)
     return ;
 
-  struct sql_cmd *obj = (struct sql_cmd *) object;
+  struct sqlcmd *obj = (struct sqlcmd *) object;
 
   if (obj->path != NULL)
     g_free(obj->path);
 
-  if (obj->buffer != NULL)
-    g_free(obj->buffer);
+  if (obj->path2 != NULL)
+    g_free(obj->path);
+
+  if (obj->sql != NULL)
+    g_free(obj->sql);
+
+  if (obj->obj != NULL)
+    free_sqlfs_object(obj->obj);
 
   if (obj != NULL)
     g_free(obj);
@@ -426,12 +449,12 @@ void create_dir(const char *pathdir, GError **error)
     int level = g_strv_length(parent);
   
     if (level == 1) {
-      add2deploy(CREP, pathdir, D_SCHEMA, NULL);
+      dir2deploy(CREP, pathdir, D_SCHEMA);
       create_schema(g_path_get_basename(pathdir), &terr);
     }
     else
       if (level == 2) {
-	add2deploy(CREP, pathdir, D_U, NULL);
+	dir2deploy(CREP, pathdir, D_U);
 	create_table(*parent, g_path_get_basename(pathdir), &terr);
       }
       else
@@ -498,7 +521,7 @@ void write_object(const char *path, const char *buffer, GError **error)
     }
 
     if (object && buffer && strlen(buffer) > 0) {
-      add2deploy(CREP, path, object->type, buffer);
+      add2deploy(CREP, path, NULL, ms2sqlfs(object), buffer);
       write_ms_object(*schema, pobj, buffer, object, &terr);
     }
 
@@ -556,7 +579,7 @@ void truncate_object(const char *path, off_t offset, GError **error)
       g_mutex_unlock(&cache.m);
     }
 
-    add2deploy(CREP, path, obj->type, obj->def);
+    add2deploy(CREP, path, NULL, ms2sqlfs(obj), obj->def);
 
     if (g_strv_length(schema) > 0) {
       g_strfreev(schema);
@@ -580,7 +603,7 @@ void remove_object(const char *path, GError **error)
   if (terr == NULL) {
     struct sqlfs_ms_obj *object = find_cache_obj(path, &terr);
     if (terr == NULL) {
-      add2deploy(DROP, path, object->type, NULL);
+      add2deploy(DROP, path, NULL, ms2sqlfs(object), NULL);
       remove_ms_object(*schema, *(schema + 1), object, &terr);      
     }
     
@@ -621,7 +644,6 @@ void rename_object(const char *oldname, const char *newname, GError **error)
 		"%d: Operation not supported", __LINE__);
   
   if (terr == NULL) {
-    add2deploy(RENAME, oldname, 0, newname);
     struct sqlfs_ms_obj *obj_new = find_cache_obj(newname, &terr);
     if (terr == NULL) {
       if (g_hash_table_contains(cache.app_table, newname)) {
@@ -686,6 +708,8 @@ void free_sqlfs_object(gpointer object)
   if (obj->def != NULL)
     g_free(obj->def);
 
+  g_rw_lock_clear(&obj->lock);
+  
   if (obj != NULL)
     g_free(obj);
 }

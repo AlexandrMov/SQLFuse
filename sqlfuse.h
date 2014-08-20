@@ -46,6 +46,8 @@
 
 
 struct sqlfs_object {
+  GRWLock lock;
+  
   gchar *name;
   int object_id;
   unsigned int type;
