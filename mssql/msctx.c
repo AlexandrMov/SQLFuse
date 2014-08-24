@@ -185,11 +185,12 @@ void create_table(const char *schema, const char *name, GError **error)
     g_propagate_error(error, terr);
 }
   
-void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
-		     const char *text, struct sqlfs_ms_obj *obj, GError **err)
+char * write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
+		       const char *text, struct sqlfs_ms_obj *obj, GError **err)
 {
   int error = 0;
   GError *terr = NULL;
+  char *wrktext = NULL;
   start_checker();
 
   YY_BUFFER_STATE bp;
@@ -202,7 +203,6 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
     node = get_node();
   
   if (!error && node != NULL) {
-    char *wrktext = NULL;
     switch (node->type) {
     case COLUMN:
       wrktext = create_column_def(schema, parent->name, obj,
@@ -270,9 +270,8 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       wrktext = g_strdup(text);
     }
 
-    msctx_t *ctx = exec_sql(g_strchomp(wrktext), &terr);
-    close_sql(ctx);
-    g_free(wrktext);
+    wrktext = g_strchomp(wrktext);
+    
   }
   else {
     g_set_error(&terr, EEPARSE, EEPARSE, "Parse error");
@@ -284,12 +283,16 @@ void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 
   if (terr != NULL)
     g_propagate_error(err, terr);
+  
+  return wrktext;
+
 }
   
-void remove_ms_object(const char *schema, const char *parent,
-		      struct sqlfs_ms_obj *obj, GError **error)
+char * remove_ms_object(const char *schema, const char *parent,
+			struct sqlfs_ms_obj *obj, GError **error)
 {
   GError *terr = NULL;
+  char *result = NULL;
   GString *sql = g_string_new(NULL);
   if (obj->type == R_COL) {
     g_string_append_printf(sql, "ALTER TABLE [%s].[%s] DROP COLUMN [%s]",
@@ -344,8 +347,7 @@ void remove_ms_object(const char *schema, const char *parent,
   }
 
   if (terr == NULL) {
-    msctx_t *ctx = exec_sql(sql->str, &terr);
-    close_sql(ctx);
+    result = g_strdup(sql->str);
   }
 
   if (terr != NULL)
@@ -353,6 +355,7 @@ void remove_ms_object(const char *schema, const char *parent,
   
   g_string_free(sql, TRUE);
 
+  return result;
 }
 
 static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj,

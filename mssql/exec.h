@@ -27,30 +27,38 @@ typedef struct {
   
 } msctx_t;
 
+
 /*
- *
  * Инициализация контекста
- *
  */
 void init_context(gpointer err_handler, gpointer msg_handler, GError **error);
 
+
 /*
- *
+ * Найти свободный контекст и захватить блокировку
+ */
+msctx_t * get_msctx(GError **error);
+
+
+/*
  * Выполнить SQL-запрос на основе контекста
- *
+ */
+void exec_sql_cmd(const char *sql, msctx_t *msctx, GError **error);
+
+
+/*
+ * Выполнить SQL-запрос на основе контекста
  */
 msctx_t * exec_sql(const char *sql, GError **err);
 
+
 /*
- *
  * Закончить выполнение SQL-запроса
- *
  */
 void close_sql(msctx_t *context);
 
+
 /*
- *
  * Закрытие контекста
- *
  */
 void close_context(GError **error);

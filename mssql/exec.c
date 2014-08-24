@@ -132,14 +132,16 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
 	DBSETLAPP(msctx->login, sqlctx->appname);
 
 	if ((msctx->dbproc = dbopen(msctx->login, sqlctx->servername)) == NULL) {
-	  g_set_error(&terr, EECONN, EECONN, "%s:%d: unable to connect to %s as %s\n",
+	  g_set_error(&terr, EECONN, EECONN,
+		      "%s:%d: unable to connect to %s as %s\n",
 		      sqlctx->appname, __LINE__,
 		      sqlctx->servername, sqlctx->username);
 	}
 
 	if (terr == NULL && sqlctx->dbname
 	    && (erc = dbuse(msctx->dbproc, sqlctx->dbname)) == FAIL) {
-	  g_set_error(&terr, EEUSE, EEUSE, "%s:%d: unable to use to database %s\n",
+	  g_set_error(&terr, EEUSE, EEUSE,
+		      "%s:%d: unable to use to database %s\n",
 		      sqlctx->appname, __LINE__, sqlctx->dbname);
 	}
       }
@@ -164,7 +166,7 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
     g_propagate_error(error, terr);
 }
 
-msctx_t * exec_sql(const char *sql, GError **error)
+msctx_t * get_msctx(GError **error)
 {
   gboolean lock;
   int i, len = g_slist_length(ectx->ctxlist);
@@ -211,14 +213,9 @@ msctx_t * exec_sql(const char *sql, GError **error)
 	clear_context();
 	
       }
-      
-      if (terr == NULL && do_exec_sql(sql, wrkctx, &terr) == FALSE
-	  && !dbdead(wrkctx->dbproc)) {
-	g_clear_error(&terr);
-	g_set_error(&terr, EECONN, EECONN, "SQL Error: %s\n", sql);
-      }
 
-      if (terr != NULL) {	
+      if (terr != NULL) {
+	
 	if (!dbdead(wrkctx->dbproc)) {
 	  g_mutex_unlock(&wrkctx->lock);
 	  break;
@@ -226,9 +223,12 @@ msctx_t * exec_sql(const char *sql, GError **error)
 	
 	g_clear_error(&terr);
 	g_mutex_unlock(&wrkctx->lock);
+	
       }
-      else
-	break;  
+      else {
+	break;
+      }
+      
     }
 
     list = g_slist_next(list);
@@ -240,7 +240,6 @@ msctx_t * exec_sql(const char *sql, GError **error)
     if (list && list->data) {
       wrkctx = list->data;
       g_mutex_lock(&wrkctx->lock);
-      do_exec_sql(sql, wrkctx, &terr);
     }
 
   }
@@ -250,6 +249,33 @@ msctx_t * exec_sql(const char *sql, GError **error)
   if (terr != NULL)
     g_propagate_error(error, terr);
 
+  return wrkctx;
+}
+
+void exec_sql_cmd(const char *sql, msctx_t *msctx, GError **error)
+{
+  GError *terr = NULL;
+
+  if (do_exec_sql(sql, msctx, &terr) == FALSE && !dbdead(msctx->dbproc)) {
+    g_clear_error(&terr);
+    g_set_error(&terr, EECONN, EECONN, "SQL Error: %s\n", sql);
+  }
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+}
+
+msctx_t * exec_sql(const char *sql, GError **error)
+{
+  GError *terr = NULL;
+  msctx_t *wrkctx = get_msctx(&terr);
+
+  if (terr == NULL)
+    exec_sql_cmd(sql, wrkctx, &terr);
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+  
   return wrkctx;
 }
 

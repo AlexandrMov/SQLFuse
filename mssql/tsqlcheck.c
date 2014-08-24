@@ -128,7 +128,7 @@ void end_checker()
     
     if (checker->node->type == CHECK
 	&& checker->node->check_node != NULL)
-      g_free(checker->node->check_node);
+	g_free(checker->node->check_node);
     
     g_free(checker->node);
   }

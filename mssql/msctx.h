@@ -202,8 +202,8 @@ void create_table(const char *schema, const char *name, GError **error);
 /*
  * Создать/записать объект
  */
-void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
-		     const char *text, struct sqlfs_ms_obj *obj, GError **error);
+char * write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
+		       const char *text, struct sqlfs_ms_obj *obj, GError **error);
 
 /*
  * Переименовать/переместить объект
@@ -215,8 +215,8 @@ void rename_ms_object(const char *schema_old, const char *schema_new,
 /*
  * Удалить объект
  */
-void remove_ms_object(const char *schema, const char *parent,
-		      struct sqlfs_ms_obj *obj, GError **error);
+char * remove_ms_object(const char *schema, const char *parent,
+			struct sqlfs_ms_obj *obj, GError **error);
 
 /*
  * Убрать за объектом
