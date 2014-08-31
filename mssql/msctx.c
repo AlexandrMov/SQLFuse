@@ -78,7 +78,7 @@ void init_msctx(GError **error)
   init_checker();
 }
 
-struct sqlfs_ms_obj * find_ms_object(const struct sqlfs_ms_obj *parent,
+struct sqlfs_ms_obj * find_ms_object(struct sqlfs_ms_obj *parent,
 				     const char *name, GError **error)
 {
   GError *terr = NULL;
@@ -107,8 +107,11 @@ struct sqlfs_ms_obj * find_ms_object(const struct sqlfs_ms_obj *parent,
   if (terr != NULL)
     g_propagate_error(error, terr);
   else
-    if (list != NULL)
+    if (list != NULL) {
       result = g_list_first(list)->data;
+      g_list_free(list);
+    }
+      
   
   return result;
 }
@@ -426,6 +429,31 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
   return obj->def;
 }
 
+char * make_module_text(const char *schema, const char *parent,
+			struct sqlfs_ms_obj *obj, GError **error)
+{
+  GError *terr = NULL;
+  char *def = obj->def;
+  
+  switch(obj->type) {
+  case R_COL:
+    def = make_column_def(obj);
+    break;
+  case R_C:
+  case R_D:
+  case R_PK:
+  case R_UQ:
+  case R_X:
+  case R_F:
+    break;
+  }
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+
+  return def;
+}
+
 char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
 			GError **error)
 {
@@ -453,10 +481,11 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
   return def;
 }
 
-void rename_ms_object(const char *schema_old, const char *schema_new,
-		      struct sqlfs_ms_obj *obj_old, struct sqlfs_ms_obj *obj_new,
-		      struct sqlfs_ms_obj *parent, GError **error)
+char * rename_ms_object(const char *schema_old, const char *schema_new,
+			struct sqlfs_ms_obj *obj_old, struct sqlfs_ms_obj *obj_new,
+			struct sqlfs_ms_obj *parent, GError **error)
 {
+  char *result = NULL;
   GError *terr = NULL;
   
   if (obj_old->type == R_TR && g_str_has_prefix(obj_old->name, "#"))
@@ -506,8 +535,7 @@ void rename_ms_object(const char *schema_old, const char *schema_new,
     }
 
     if (terr == NULL) {
-      msctx_t *ctx = exec_sql(sql->str, &terr);
-      close_sql(ctx);
+      result = g_strdup(sql->str);
     }
     
     g_string_free(sql, TRUE);
@@ -515,6 +543,8 @@ void rename_ms_object(const char *schema_old, const char *schema_new,
     
   if (terr != NULL)
     g_propagate_error(error, terr);
+
+  return result;
 }
 
 GList * fetch_table_obj(int schema_id, int table_id, const char *name,

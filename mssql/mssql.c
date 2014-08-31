@@ -81,6 +81,8 @@ static void mask_path(const char *path, unsigned int object_id)
   }
   
   mask->masked = TRUE;
+
+  g_timer_start(deploy.timer);
 }
 
 static void unmask_path(const char *path)
@@ -89,6 +91,79 @@ static void unmask_path(const char *path)
   if (mask != NULL) {
     mask->masked = FALSE;
   }
+
+  g_timer_start(deploy.timer);
+}
+
+static struct sqlfs_ms_obj * do_find(const char *pathname, GError **error)
+{
+  GError *terr = NULL;
+  GList *list = NULL;
+
+  unsigned int i = 0;
+  const char *pn = g_path_skip_root(pathname);
+  if (pn == NULL)
+    pn = pathname;
+
+  char **tree = g_strsplit(pn, G_DIR_SEPARATOR_S, -1);
+  GString *path = g_string_new(NULL);
+  
+  while(*tree && !terr) {
+    g_string_append_printf(path, "%s%s", G_DIR_SEPARATOR_S, *tree);
+    struct sqlfs_ms_obj *obj = g_hash_table_lookup(cache.db_table, path->str);
+    
+    if (!obj) {
+      if (i == 0) {
+	obj = find_ms_object(NULL, *tree, &terr);
+      }
+      if (i > 0) {
+	obj = find_ms_object(g_list_last(list)->data, *tree, &terr);
+      }
+    }
+    
+    if (!terr) {
+      
+      if (obj && obj->name) {
+	list = g_list_append(list, obj);
+	if (!g_hash_table_contains(cache.db_table, path->str)) {
+	  g_mutex_lock(&cache.m);
+	  g_hash_table_insert(cache.db_table, g_strdup(path->str), obj);
+	  g_mutex_unlock(&cache.m);
+	}
+      }
+      else {
+	g_set_error(&terr, EENOTFOUND, EENOTFOUND,
+		    "%d: Object not found\n", __LINE__);
+	break;
+      }
+      
+    } else {
+      g_clear_error(&terr);
+      g_set_error(&terr, EERES, EERES,
+		  "%d: Find object failed\n", __LINE__);
+      break;
+    }
+    
+    tree++;
+    i++;
+  }
+
+  struct sqlfs_ms_obj *result = NULL;
+  
+  GList *last = g_list_last(list);
+  if (last && terr == NULL)
+    result = last->data;
+  
+  g_list_free(list);
+  
+  tree -= i;
+  g_strfreev(tree);
+  g_string_free(path, TRUE);
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+
+  return result;
 }
 
 static struct sqlfs_ms_obj * find_cache_obj(const char *pathname, GError **error)
@@ -97,18 +172,9 @@ static struct sqlfs_ms_obj * find_cache_obj(const char *pathname, GError **error
     return NULL;
 
   GError *terr = NULL;
-  GList *list = NULL;
-  
-  const gchar * pn = g_path_skip_root(pathname);
-  if (pn == NULL)
-    pn = pathname;
-  
-  gchar **tree = g_strsplit(pn, G_DIR_SEPARATOR_S, -1);
-  GString * path = g_string_new(NULL);
-  guint i = 0;
 
   // объект в кэше удалён
-  if (is_masked(pathname)) {
+  if (is_masked(pathname)) {	
     g_set_error(&terr, EENOTFOUND, EENOTFOUND,
 		"%d: Object not found\n", __LINE__);
   }
@@ -118,58 +184,8 @@ static struct sqlfs_ms_obj * find_cache_obj(const char *pathname, GError **error
     obj = g_hash_table_lookup(cache.db_table, pathname);
   
   if (!obj && terr == NULL) {
-    
-    while(*tree && !terr) {
-      g_string_append_printf(path, "%s%s", G_DIR_SEPARATOR_S, *tree);
-      obj = g_hash_table_lookup(cache.db_table, path->str);
-      
-      if (!obj) {
-	if (i == 0) {
-	  obj = find_ms_object(NULL, *tree, &terr);
-	}
-	if (i > 0) {
-	  obj = find_ms_object(g_list_last(list)->data, *tree, &terr);
-	}
-      }
-      
-      if (!terr) {
-	
-	if (obj && obj->name) {
-	  list = g_list_append(list, obj);
-	  if (!g_hash_table_contains(cache.db_table, path->str)) {
-	    g_mutex_lock(&cache.m);
-	    g_hash_table_insert(cache.db_table, g_strdup(path->str), obj);
-	    g_mutex_unlock(&cache.m);
-	  }
-	}
-	else {
-	  g_set_error(&terr, EENOTFOUND, EENOTFOUND,
-		      "%d: Object not found\n", __LINE__);
-	  break;
-	}
-	
-      } else {
-	g_clear_error(&terr);
-	g_set_error(&terr, EERES, EERES,
-		    "%d: Find object failed\n", __LINE__);
-	break;
-      }
-      
-      tree++;
-      i++;
-    }
-    
-    GList *last = g_list_last(list);
-    if (last)
-      obj = last->data;
-    
-    g_list_free(list);
-    
+    obj = do_find(pathname, &terr);
   }
-
-  tree -= i;
-  g_strfreev(tree);
-  g_string_free(path, TRUE);
 
   if (terr != NULL)
     g_propagate_error(error, terr); 
@@ -202,46 +218,6 @@ static struct sqlfs_object * ms2sqlfs(struct sqlfs_ms_obj *src)
   return result;
 }
 
-static void do_rename(const char *oldname, const char *newname,
-		      gchar **schemaold, gchar **schemanew, GError **error)
-{
-  GError *terr = NULL;
-  gchar *ppold = g_path_get_dirname(oldname);
-  
-  struct sqlfs_ms_obj
-    *ppobj_old = find_cache_obj(ppold, &terr),
-    *obj_old = find_cache_obj(oldname, &terr),
-    *obj_new = g_try_new0(struct sqlfs_ms_obj, 1);
-  
-  if (terr == NULL) {
-    obj_old->name = g_path_get_basename(oldname);
-    obj_new->name = g_path_get_basename(newname);
-    
-    if (!g_hash_table_contains(cache.app_table, oldname)) {
-      rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,
-		       ppobj_old, &terr);
-      
-      if (terr == NULL) {
-	SAFE_REMOVE_ALL(oldname);
-      }
-      
-    } else {
-      obj_old->name = g_strdup(obj_new->name);
-      g_mutex_lock(&cache.m);
-      g_hash_table_steal(cache.app_table, oldname);
-      g_hash_table_insert(cache.app_table, g_strdup(newname), obj_old);
-      g_mutex_unlock(&cache.m);
-    }
-    
-  }
-  
-  if (terr != NULL)
-    g_propagate_error(error, terr);
-  
-  g_free(ppold);
-  free_ms_obj(obj_new);
-}
-
 
 static void add2deploy(enum action act, const char *path, const char *path2,
 		       struct sqlfs_object *obj, const char *sql)
@@ -255,7 +231,7 @@ static void add2deploy(enum action act, const char *path, const char *path2,
   if (act == DROP) {
     mask_path(path, obj->object_id);
   }
-  
+
   struct sqlcmd *cmd = g_try_new0(struct sqlcmd, 1);
   cmd->path = g_strdup(path);
   cmd->path2 = g_strdup(path2);
@@ -273,6 +249,7 @@ static void add2deploy(enum action act, const char *path, const char *path2,
   g_cond_signal(&deploy.cond);
   g_mutex_unlock(&deploy.lock);
 }
+
 
 static inline void dir2deploy(enum action act, const char *path,
 			      unsigned int objtype)
@@ -329,10 +306,8 @@ static inline void do_deploy_sql()
     struct sqlcmd *cmd = g_sequence_get(iter);
     
     SAFE_REMOVE_ALL(cmd->path);
-    
     if (cmd->sql != NULL && terr == NULL) {
       exec_sql_cmd(cmd->sql, ctx, &terr);
-      
       // если ошибка, - откатить транзакцию
       if (terr != NULL) {
 	GError *rerr = NULL;
@@ -415,7 +390,7 @@ static void free_sqlcmd_object(gpointer object)
     g_free(obj->path);
 
   if (obj->path2 != NULL)
-    g_free(obj->path);
+    g_free(obj->path2);
 
   if (obj->sql != NULL)
     g_free(obj->sql);
@@ -459,7 +434,11 @@ struct sqlfs_object * find_object(const char *pathfile, GError **error)
   GError *terr = NULL;
   struct sqlfs_object *result;
   struct sqlfs_ms_obj *obj = find_cache_obj(pathfile, &terr);
-  
+
+  if (obj == NULL && terr == NULL)
+    g_set_error(&terr, EENOTFOUND, EENOTFOUND,
+		"%d: Object not found\n", __LINE__);
+    
   if (terr == NULL) {
     result = ms2sqlfs(obj);
   }
@@ -544,7 +523,7 @@ GList * fetch_dir_objects(const char *pathdir, GError **error)
 
 char * fetch_object_text(const char *path, GError **error)
 {
-  char *text;
+  char *text = NULL;
 
   GError *terr = NULL;
   struct sqlfs_ms_obj *object = find_cache_obj(path, &terr);
@@ -655,7 +634,7 @@ void write_object(const char *path, const char *buffer, GError **error)
     struct sqlfs_ms_obj *pobj = find_cache_obj(pp, &terr),
       *object = find_cache_obj(path, &terr);
 
-    if (terr != NULL && terr->code == EENOTFOUND) {
+    if (terr != NULL) {
       g_clear_error(&terr);
       object->name = g_path_get_basename(path);
     }
@@ -754,16 +733,10 @@ void remove_object(const char *path, GError **error)
   if (terr == NULL) {
     struct sqlfs_ms_obj *object = find_cache_obj(path, &terr);
     if (terr == NULL) {
-      if (g_hash_table_contains(cache.app_table, path)) {
+      char *sql = remove_ms_object(*schema, *(schema + 1), object, &terr);
+      if (terr == NULL) {
+	add2deploy(DROP, path, NULL, ms2sqlfs(object), sql);
 	SAFE_REMOVE_ALL(path);
-	mask_path(path, object->object_id);
-      }
-      else {
-	char *sql = remove_ms_object(*schema, *(schema + 1), object, &terr);
-	if (terr == NULL) {
-	  add2deploy(DROP, path, NULL, ms2sqlfs(object), sql);
-	  SAFE_REMOVE_ALL(path);
-	}
       }
     }
 
@@ -787,70 +760,111 @@ void rename_object(const char *oldname, const char *newname, GError **error)
 				 G_DIR_SEPARATOR_S, -1);
   gchar **schemanew = g_strsplit(g_path_skip_root(newname),
 				 G_DIR_SEPARATOR_S, -1);
-  
+
+  // не перемещать объект в корневой уровень
   if (g_strv_length(schemanew) == 1)
     g_set_error(&terr, EENOTSUP, EENOTSUP,
 		"%d: Operation not supported", __LINE__);
   
+  // не перемещать между разными уровнями
   if (g_strv_length(schemaold) != g_strv_length(schemanew))
     g_set_error(&terr, EENOTSUP, EENOTSUP,
 		"%d: Operation not supported", __LINE__);
-  
+
+  // не перемещать объекты таблиц в другие таблицы
   if (g_strv_length(schemanew) > 2
       && g_strcmp0(*(schemanew + 1), *(schemaold + 1)))
     g_set_error(&terr, EENOTSUP, EENOTSUP,
 		"%d: Operation not supported", __LINE__);
-  
-  if (terr == NULL) {
-    struct sqlfs_ms_obj *obj_new = find_cache_obj(newname, &terr);
-    if (terr == NULL) {
-      if (g_hash_table_contains(cache.app_table, newname)) {
-	g_hash_table_remove(cache.app_table, newname);
-	do_rename(oldname, newname, schemaold, schemanew, &terr);
-      }
-      else {
-	struct sqlfs_ms_obj *obj_old = find_cache_obj(oldname, &terr);
-	if (g_hash_table_contains(cache.app_table, oldname)) {
-	  obj_old->name = g_strdup(obj_new->name);
-	  g_mutex_lock(&cache.m);
-	  g_hash_table_steal(cache.app_table, oldname);
-	  g_hash_table_insert(cache.app_table, g_strdup(newname), obj_old);
-	  g_mutex_unlock(&cache.m);
-	}
-	else {	    
-	  char *def = load_module_text(*schemaold, obj_old, &terr);
-	  if (terr == NULL) {
-	    gchar *ppnew = g_path_get_dirname(newname);
-	    
-	    g_free(obj_old->name);
-	    obj_old->name = g_strdup(obj_new->name);
-	    
-	    struct sqlfs_ms_obj *ppobj_new = find_cache_obj(ppnew, &terr);
-	    char *sql = write_ms_object(*schemanew, ppobj_new, def, obj_old, &terr);
-	    if (sql != NULL && terr == NULL)
-	      add2deploy(CREP, newname, NULL, ms2sqlfs(obj_old), sql);
-	    
-	    g_free(ppnew);
-	  }
-	}
-	
-	SAFE_REMOVE_ALL(oldname);
-      }
-    }
-    else {
-      g_clear_error(&terr);
-      
-      if (g_hash_table_contains(cache.app_table, newname))
-	g_hash_table_remove(cache.app_table, newname);
 
-      do_rename(oldname, newname, schemaold, schemanew, &terr);
+  if (terr == NULL) {
+    gboolean is_app = FALSE, is_db = FALSE;
+    struct sqlfs_ms_obj *obj_new = g_hash_table_lookup(cache.app_table, newname);
+    
+    if (obj_new == NULL)
+      obj_new = g_hash_table_lookup(cache.db_table, newname);
+    else
+      is_app = g_hash_table_steal(cache.app_table, newname);
+    
+    if (obj_new == NULL) {
+      struct sqlmask *mask = g_hash_table_lookup(cache.mask_table, newname);
+      if (mask != NULL && mask->object_id)
+	obj_new = do_find(newname, &terr);
+
+      if (terr != NULL) {
+	g_clear_error(&terr);
+	obj_new = NULL;
+      }
       
     }
+    else
+      if (!is_app)
+	is_db = g_hash_table_steal(cache.db_table, newname);
+
+    struct sqlfs_ms_obj *obj_old = find_cache_obj(oldname, &terr);
+    if (obj_new != NULL) {
+
+      // новый объект не временный, и он не соответствует типу старого
+      // или старый объект с неопределённым типом, - удалить новый объект
+      if (obj_new->object_id && is_db
+	  && (obj_old->type != obj_new->type || obj_old->type != R_TEMP)) {
+	char *sql = remove_ms_object(*schemanew, *(schemanew + 1), obj_new, &terr);
+	if (terr == NULL) {
+	  add2deploy(DROP, newname, NULL, ms2sqlfs(obj_new), sql);
+	}
+      }
+
+    }
+    
+    gchar *ppold = g_path_get_dirname(oldname);
+    struct sqlfs_ms_obj
+      *ppobj_old = find_cache_obj(ppold, &terr);
+
+    gboolean allocated = FALSE;
+    if (obj_new == NULL) {
+      obj_new = g_try_new0(struct sqlfs_ms_obj, 1);
+      obj_new->name = g_path_get_basename(newname);
+      allocated = TRUE;
+    }
+
+    char *sql = rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,
+				 ppobj_old, &terr);
+    if (terr == NULL && sql != NULL) {
+      add2deploy(RENAME, oldname, newname, ms2sqlfs(obj_old), sql);
+    }
+
+    g_free(ppold);
+
+    if (obj_new != NULL && allocated)
+      free_ms_obj(obj_new);
+    
+    // переименование в кэше
+    if (terr == NULL) {
+      g_mutex_lock(&cache.m);
+
+      // объект более не существует
+      mask_path(oldname, 0);
+
+      if (g_hash_table_contains(cache.app_table, oldname))
+	g_hash_table_steal(cache.app_table, oldname);
+      
+      if (g_hash_table_contains(cache.db_table, oldname))
+	g_hash_table_steal(cache.db_table, oldname);
+
+      g_free(obj_old->name);
+      obj_old->name = g_path_get_basename(newname);
+      
+      g_hash_table_insert(cache.app_table, g_strdup(newname), obj_old);
+      unmask_path(newname);
+      
+      g_mutex_unlock(&cache.m);
+    }
+    
   }
   
   g_strfreev(schemanew);
   g_strfreev(schemaold);
-
+  
   if (terr != NULL)
     g_propagate_error(error, terr);
 }

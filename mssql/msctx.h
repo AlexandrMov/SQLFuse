@@ -160,7 +160,7 @@ void init_msctx(GError **error);
 /*
  * Найти объект
  */
-struct sqlfs_ms_obj * find_ms_object(const struct sqlfs_ms_obj *parent,
+struct sqlfs_ms_obj * find_ms_object(struct sqlfs_ms_obj *parent,
 				     const char *name, GError **error);
 
 /*
@@ -180,6 +180,12 @@ GList * fetch_schema_obj(int schema_id, const char *name,
  */
 GList * fetch_table_obj(int schema_id, int table_id, const char *name,
 			GError **error);
+
+/*
+ * Сформировать текст модуля
+ */
+char * make_module_text(const char *schema, const char *parent,
+			struct sqlfs_ms_obj *obj, GError **error);
 
 /*
  * Загрузить полный программный текст модуля
@@ -208,9 +214,9 @@ char * write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 /*
  * Переименовать/переместить объект
  */
-void rename_ms_object(const char *schema_old, const char *schema_new,
-		      struct sqlfs_ms_obj *obj_old, struct sqlfs_ms_obj *obj_new,
-		      struct sqlfs_ms_obj *parent, GError **error);
+char * rename_ms_object(const char *schema_old, const char *schema_new,
+			struct sqlfs_ms_obj *obj_old, struct sqlfs_ms_obj *obj_new,
+			struct sqlfs_ms_obj *parent, GError **error);
 
 /*
  * Удалить объект
