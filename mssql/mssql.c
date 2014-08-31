@@ -732,14 +732,14 @@ void remove_object(const char *path, GError **error)
 
   if (terr == NULL) {
     struct sqlfs_ms_obj *object = find_cache_obj(path, &terr);
-    if (terr == NULL) {
+    if (terr == NULL && object->type != R_TEMP) {
       char *sql = remove_ms_object(*schema, *(schema + 1), object, &terr);
       if (terr == NULL) {
 	add2deploy(DROP, path, NULL, ms2sqlfs(object), sql);
-	SAFE_REMOVE_ALL(path);
       }
     }
-
+    
+    SAFE_REMOVE_ALL(path);
   }
 
   if (g_strv_length(schema) > 0) {
@@ -815,28 +815,30 @@ void rename_object(const char *oldname, const char *newname, GError **error)
       }
 
     }
-    
-    gchar *ppold = g_path_get_dirname(oldname);
-    struct sqlfs_ms_obj
-      *ppobj_old = find_cache_obj(ppold, &terr);
 
-    gboolean allocated = FALSE;
-    if (obj_new == NULL) {
-      obj_new = g_try_new0(struct sqlfs_ms_obj, 1);
-      obj_new->name = g_path_get_basename(newname);
-      allocated = TRUE;
+    if (obj_old->type != R_TEMP) {
+      gchar *ppold = g_path_get_dirname(oldname);
+      struct sqlfs_ms_obj
+	*ppobj_old = find_cache_obj(ppold, &terr);
+
+      gboolean allocated = FALSE;
+      if (obj_new == NULL) {
+	obj_new = g_try_new0(struct sqlfs_ms_obj, 1);
+	obj_new->name = g_path_get_basename(newname);
+	allocated = TRUE;
+      }
+
+      char *sql = rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,
+				   ppobj_old, &terr);
+      if (terr == NULL && sql != NULL) {
+	add2deploy(RENAME, oldname, newname, ms2sqlfs(obj_old), sql);
+      }
+
+      g_free(ppold);
+
+      if (obj_new != NULL && allocated)
+	free_ms_obj(obj_new);
     }
-
-    char *sql = rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,
-				 ppobj_old, &terr);
-    if (terr == NULL && sql != NULL) {
-      add2deploy(RENAME, oldname, newname, ms2sqlfs(obj_old), sql);
-    }
-
-    g_free(ppold);
-
-    if (obj_new != NULL && allocated)
-      free_ms_obj(obj_new);
     
     // переименование в кэше
     if (terr == NULL) {
