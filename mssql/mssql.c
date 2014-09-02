@@ -467,13 +467,14 @@ static inline void cut_deploy_sql()
 
     if (cmd->act == CREP && cmd->mstype == R_COL && !cmd->is_disabled
 	&& !g_str_has_prefix(cmd->sql, "ALTER TABLE")) {
+
       gchar **schema = g_strsplit(g_path_skip_root(cmd->path),
 				  G_DIR_SEPARATOR_S, -1);
       
       g_string_append_printf(sql, "ALTER TABLE [%s].[%s]",
 			     *schema, *(schema + 1));
       
-      if (is_masked(cmd->path))
+      if (get_mask_id(cmd->path))
 	g_string_append_printf(sql, " ALTER COLUMN %s", cmd->sql);
       else
 	g_string_append_printf(sql, " ADD %s", cmd->sql);
@@ -484,6 +485,8 @@ static inline void cut_deploy_sql()
       if (g_strv_length(schema) > 0) {
 	g_strfreev(schema);
       }
+      
+      g_string_truncate(sql, 0);
     }
     
     iter = g_sequence_iter_next(iter); 
