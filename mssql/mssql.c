@@ -34,6 +34,7 @@ enum action {
 struct sqlcmd {
   enum action act;
   char *path, *path2;
+  unsigned int mstype;
 
   struct sqlfs_object *obj;
   
@@ -193,7 +194,7 @@ static struct sqlfs_ms_obj * find_cache_obj(const char *pathname, GError **error
   return obj;
 }
 
-static struct sqlfs_object * ms2sqlfs(struct sqlfs_ms_obj *src)
+static inline struct sqlfs_object * ms2sqlfs(struct sqlfs_ms_obj *src)
 {
   struct sqlfs_object *result = g_try_new0(struct sqlfs_object, 1);
   g_rw_lock_init(&result->lock);
@@ -218,9 +219,31 @@ static struct sqlfs_object * ms2sqlfs(struct sqlfs_ms_obj *src)
   return result;
 }
 
+static gint cached_sortorder (gconstpointer a, gconstpointer b,
+			      gpointer user_data)
+{
+  if (a == NULL || b == NULL)
+    return 0;
+
+  gint result = 0;
+  struct sqlcmd *cmda = (struct sqlcmd *) a;
+  struct sqlcmd *cmdb = (struct sqlcmd *) b;
+
+  // сортировка по времени добавления
+  if (!result) {
+    if (cmda->obj->cached_time < cmdb->obj->cached_time)
+      result = -1;
+    
+    if (cmda->obj->cached_time > cmdb->obj->cached_time)
+      result = 1;
+  }
+  
+  return result;
+}
+
 
 static void add2deploy(enum action act, const char *path, const char *path2,
-		       struct sqlfs_object *obj, const char *sql)
+		       struct sqlfs_ms_obj *obj, const char *sql)
 {
   g_mutex_lock(&deploy.lock);
 
@@ -235,14 +258,16 @@ static void add2deploy(enum action act, const char *path, const char *path2,
   struct sqlcmd *cmd = g_try_new0(struct sqlcmd, 1);
   cmd->path = g_strdup(path);
   cmd->path2 = g_strdup(path2);
+  cmd->mstype = obj->type;
 
-  cmd->obj = obj;
+  cmd->obj = ms2sqlfs(obj);
   
   if (sql != NULL)
     cmd->sql = g_strdup(sql);
 
   cmd->act = act;
-  g_sequence_append(deploy.sql_seq, cmd);
+  
+  g_sequence_insert_sorted(deploy.sql_seq, cmd, &cached_sortorder, NULL);
 
   g_timer_start(deploy.timer);
 
@@ -250,22 +275,10 @@ static void add2deploy(enum action act, const char *path, const char *path2,
   g_mutex_unlock(&deploy.lock);
 }
 
-
-static inline void dir2deploy(enum action act, const char *path,
-			      unsigned int objtype)
-{
-  struct sqlfs_object *res = g_try_new0(struct sqlfs_object, 1);
-  res->type = objtype;
-  res->cached_time = g_get_monotonic_time();
-
-  add2deploy(act, path, NULL, res, NULL);
-}
-
-
 static inline void cut_deploy_sql()
 {
   GSequenceIter *iter = g_sequence_get_begin_iter(deploy.sql_seq);
-
+  
   while(!g_sequence_iter_is_end(iter)) {
     struct sqlcmd *cmd = g_sequence_get(iter);
     if (!g_sequence_iter_is_begin(iter)) {
@@ -287,6 +300,7 @@ static inline void cut_deploy_sql()
     
     iter = g_sequence_iter_next(iter); 
   }
+
 }
 
 static inline void do_deploy_sql()
@@ -304,8 +318,10 @@ static inline void do_deploy_sql()
 
   while(!g_sequence_iter_is_end(iter)) {
     struct sqlcmd *cmd = g_sequence_get(iter);
-    
+
+    // в том числе временные схемы и таблицы
     SAFE_REMOVE_ALL(cmd->path);
+
     if (cmd->sql != NULL && terr == NULL) {
       exec_sql_cmd(cmd->sql, ctx, &terr);
       // если ошибка, - откатить транзакцию
@@ -345,6 +361,17 @@ static inline void do_deploy_sql()
 			  g_sequence_get_end_iter(deploy.sql_seq));
 }
 
+static gboolean clear_rtemp_files(gpointer key, gpointer value,
+				  gpointer user_data)
+{
+  if (value != NULL) {
+    struct sqlfs_ms_obj *obj = (struct sqlfs_ms_obj *) value;
+    if (obj->type == R_TEMP)
+      return TRUE;
+  }
+
+  return FALSE;
+}
 
 static gpointer deploy_thread(gpointer data) {
   while (deploy.run) {
@@ -366,6 +393,9 @@ static gpointer deploy_thread(gpointer data) {
 
       // очистить маскировку
       g_hash_table_remove_all(cache.mask_table);
+
+      // очистить временные регулярные файлы
+      g_hash_table_foreach_remove(cache.app_table, &clear_rtemp_files, NULL);
       
       g_timer_stop(deploy.timer);
       g_mutex_unlock(&deploy.lock);
@@ -462,7 +492,7 @@ GList * fetch_dir_objects(const char *pathdir, GError **error)
     wrk = fetch_schemas(NULL, &terr);
   } else {
     object = find_cache_obj(pathdir, &terr);
-    if (terr == NULL) {
+    if (terr == NULL && !g_hash_table_contains(cache.app_table, pathdir)) {
       if (object->type == D_SCHEMA) 
 	wrk = fetch_schema_obj(object->schema_id, NULL, &terr);
       else
@@ -558,20 +588,29 @@ void create_dir(const char *pathdir, GError **error)
   
   if (terr == NULL) {
     int level = g_strv_length(parent);
-  
-    if (level == 1) {
-      dir2deploy(CREP, pathdir, D_SCHEMA);
-      create_schema(g_path_get_basename(pathdir), &terr);
+    unsigned int type = 0;
+    switch (level) {
+    case 1:
+      type = D_SCHEMA;
+      break;
+    case 2:
+      type = D_U;
+      break;
+    default:
+      g_set_error(&terr, EENOTSUP, EENOTSUP,
+		  "%d: Operation not supported", __LINE__);
+      break;
     }
-    else
-      if (level == 2) {
-	dir2deploy(CREP, pathdir, D_U);
-	create_table(*parent, g_path_get_basename(pathdir), &terr);
-      }
-      else
-	g_set_error(&terr, EENOTSUP, EENOTSUP,
-		    "%d: Operation not supported", __LINE__);
-  
+
+    if (terr == NULL) {
+      struct sqlfs_ms_obj *obj = g_try_new0(struct sqlfs_ms_obj, 1);
+      obj->type = type;
+      obj->name = g_path_get_basename(pathdir);
+
+      g_hash_table_insert(cache.app_table, g_strdup(pathdir), obj);
+      
+      add2deploy(CREP, pathdir, NULL, obj, NULL);
+    }
   }
   
   if (g_strv_length(parent) > 0) {
@@ -642,7 +681,7 @@ void write_object(const char *path, const char *buffer, GError **error)
     if (object && buffer && strlen(buffer) > 0) {
       char *sql = write_ms_object(*schema, pobj, buffer, object, &terr);
       if (terr == NULL && sql != NULL) {
-	add2deploy(CREP, path, NULL, ms2sqlfs(object), sql);
+	add2deploy(CREP, path, NULL, object, sql);
 	
 	if (object->def != NULL)
 	  g_free(object->def);
@@ -697,7 +736,7 @@ void truncate_object(const char *path, off_t offset, GError **error)
       obj->def = def;
       obj->len = strlen(obj->def);
 
-      add2deploy(CREP, path, NULL, ms2sqlfs(obj), obj->def);
+      add2deploy(CREP, path, NULL, obj, obj->def);
     }
     else {
       obj->def = g_strdup("\0");
@@ -735,7 +774,7 @@ void remove_object(const char *path, GError **error)
     if (terr == NULL && object->type != R_TEMP) {
       char *sql = remove_ms_object(*schema, *(schema + 1), object, &terr);
       if (terr == NULL) {
-	add2deploy(DROP, path, NULL, ms2sqlfs(object), sql);
+	add2deploy(DROP, path, NULL, object, sql);
       }
     }
     
@@ -778,13 +817,13 @@ void rename_object(const char *oldname, const char *newname, GError **error)
 		"%d: Operation not supported", __LINE__);
 
   if (terr == NULL) {
-    gboolean is_app = FALSE, is_db = FALSE;
+    gboolean is_exists = FALSE;
     struct sqlfs_ms_obj *obj_new = g_hash_table_lookup(cache.app_table, newname);
     
     if (obj_new == NULL)
       obj_new = g_hash_table_lookup(cache.db_table, newname);
     else
-      is_app = g_hash_table_steal(cache.app_table, newname);
+      is_exists = g_hash_table_steal(cache.app_table, newname);
     
     if (obj_new == NULL) {
       struct sqlmask *mask = g_hash_table_lookup(cache.mask_table, newname);
@@ -798,19 +837,17 @@ void rename_object(const char *oldname, const char *newname, GError **error)
       
     }
     else
-      if (!is_app)
-	is_db = g_hash_table_steal(cache.db_table, newname);
+      if (!is_exists)
+	is_exists = g_hash_table_steal(cache.db_table, newname);
 
     struct sqlfs_ms_obj *obj_old = find_cache_obj(oldname, &terr);
     if (obj_new != NULL) {
 
-      // новый объект не временный, и он не соответствует типу старого
-      // или старый объект с неопределённым типом, - удалить новый объект
-      if (obj_new->object_id && is_db
+      if ((obj_new->object_id || is_exists) && obj_new->type != R_TEMP
 	  && (obj_old->type != obj_new->type || obj_old->type != R_TEMP)) {
 	char *sql = remove_ms_object(*schemanew, *(schemanew + 1), obj_new, &terr);
 	if (terr == NULL) {
-	  add2deploy(DROP, newname, NULL, ms2sqlfs(obj_new), sql);
+	  add2deploy(DROP, newname, NULL, obj_new, sql);
 	}
       }
 
@@ -828,10 +865,15 @@ void rename_object(const char *oldname, const char *newname, GError **error)
 	allocated = TRUE;
       }
 
+      // для старого объекта ещё не был прочитан текст
+      if (g_hash_table_contains(cache.db_table, oldname) && !obj_old->def) {
+	load_module_text(*schemaold, obj_old, &terr);
+      }
+
       char *sql = rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,
 				   ppobj_old, &terr);
       if (terr == NULL && sql != NULL) {
-	add2deploy(RENAME, oldname, newname, ms2sqlfs(obj_old), sql);
+	add2deploy(RENAME, oldname, newname, obj_old, sql);
       }
 
       g_free(ppold);

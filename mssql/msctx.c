@@ -125,19 +125,20 @@ struct sqlfs_ms_obj * find_ms_object(struct sqlfs_ms_obj *parent,
       ctrt->disabled = 1;						\
   }
 
-void create_schema(const char *name, GError **error)
+char * create_schema(const char *name, GError **error)
 {
   GError *terr = NULL;
+  char *result = NULL;
   GString *sql = g_string_new(NULL);
 
   g_string_append_printf(sql, "CREATE SCHEMA [%s]", name);
-  msctx_t *ctx = exec_sql(sql->str, &terr);
-  close_sql(ctx);
-  
+  result = g_strdup(sql->str);
   g_string_free(sql, TRUE);
   
   if (terr != NULL)
     g_propagate_error(error, terr);
+
+  return result;
 }
 
 void create_table(const char *schema, const char *name, GError **error)
@@ -187,7 +188,7 @@ void create_table(const char *schema, const char *name, GError **error)
   if (terr != NULL)
     g_propagate_error(error, terr);
 }
-  
+
 char * write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 		       const char *text, struct sqlfs_ms_obj *obj, GError **err)
 {
@@ -245,9 +246,19 @@ char * write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 				 text + node->last_column);
       break;
     case PROC:
+      obj->type = R_P;
+      break;
     case FUNCTION:
-    case VIEW:
-    case TRIGGER: {
+      obj->type = R_FN;
+      break;
+    case TRIGGER:
+      obj->type = R_TR;
+      break;
+    default:
+      wrktext = g_strdup(text);
+    }
+
+    if (obj->type == R_P || obj->type == R_FN || obj->type == R_TR) {
       GString *sql = g_string_new(NULL);
       g_string_append_len(sql, text, node->module_node->first_columnm - 1);
       if (obj->object_id)
@@ -257,20 +268,16 @@ char * write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
       
       g_string_append_len(sql, text + node->module_node->last_columnm,
 			  node->first_column - node->module_node->last_columnm - 1);
-
+      
       g_string_append_printf(sql, "[%s].[%s]", schema, obj->name);
       
-      if (node->type == TRIGGER) {
+      if (obj->type == R_TR) {
 	g_string_append_printf(sql, " ON [%s].[%s]", schema, parent->name);
       }
-
+      
       g_string_append(sql, text + node->last_column);
       wrktext = g_strdup(sql->str);
       g_string_free(sql, TRUE);
-    }
-      break;
-    default:
-      wrktext = g_strdup(text);
     }
 
     wrktext = g_strchomp(wrktext);

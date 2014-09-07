@@ -196,7 +196,7 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
 /*
  * Создать схему с владельцем по умолчанию
  */
-void create_schema(const char *name, GError **error);
+char * create_schema(const char *name, GError **error);
 
 
 /*
