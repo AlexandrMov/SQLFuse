@@ -241,6 +241,84 @@ static gint cached_sortorder (gconstpointer a, gconstpointer b,
   return result;
 }
 
+static void free_sqlcmd_object(gpointer object)
+{
+  if (object == NULL)
+    return ;
+
+  struct sqlcmd *obj = (struct sqlcmd *) object;
+
+  if (obj->path != NULL)
+    g_free(obj->path);
+
+  if (obj->path2 != NULL)
+    g_free(obj->path2);
+
+  if (obj->sql != NULL)
+    g_free(obj->sql);
+
+  if (obj->obj != NULL)
+    free_sqlfs_object(obj->obj);
+
+  if (obj != NULL)
+    g_free(obj);
+}
+
+static inline void add_column2table(struct sqlcmd *cmd)
+{
+  GSequenceIter *iter = g_sequence_get_end_iter(deploy.sql_seq);
+  GError *terr = NULL;
+  GString *sql = g_string_new(NULL);
+
+  while(!g_sequence_iter_is_begin(iter)) {
+    iter = g_sequence_iter_prev(iter);
+    struct sqlcmd *icmd = g_sequence_get(iter);
+    if (icmd->act != CREP && icmd->mstype == R_COL
+	&& !g_strcmp0(cmd->path, icmd->path)) {
+      gchar **schema = g_strsplit(g_path_skip_root(cmd->path),
+				  G_DIR_SEPARATOR_S, -1);
+
+      g_string_append_printf(sql, "ALTER TABLE %s.%s", *schema, *(schema + 1));
+      if (cmd->obj->object_id) {
+	g_string_append(sql, " ALTER COLUMN ");
+      }
+      else {
+	g_string_append(sql, " ADD ");
+      }
+
+      g_string_append_printf(sql, "%s", cmd->sql);
+      g_free(cmd->sql);
+      cmd->sql = g_strdup(sql->str);
+
+      g_sequence_insert_sorted(deploy.sql_seq, cmd, &cached_sortorder, NULL);
+
+      if (g_strv_length(schema) > 0) {
+	g_strfreev(schema);
+      }
+
+      break;
+    }
+
+    if (icmd->act == CREP && icmd->mstype == D_U
+	&& g_str_has_prefix(cmd->path, icmd->path)) {
+
+      if (g_str_has_suffix(icmd->sql, "("))
+	g_string_append_printf(sql, "%s\n\t%s", icmd->sql, cmd->sql);
+      else
+	g_string_append_printf(sql, "%s,\n\t%s", icmd->sql, cmd->sql);
+
+      g_free(icmd->sql);
+      icmd->sql = g_strdup(sql->str);
+
+      free_sqlcmd_object(cmd);
+
+      break;
+    }
+
+  }
+
+  g_string_free(sql, TRUE);
+}
 
 static void add2deploy(enum action act, const char *path, const char *path2,
 		       struct sqlfs_ms_obj *obj, const char *sql)
@@ -259,15 +337,18 @@ static void add2deploy(enum action act, const char *path, const char *path2,
   cmd->path = g_strdup(path);
   cmd->path2 = g_strdup(path2);
   cmd->mstype = obj->type;
-
   cmd->obj = ms2sqlfs(obj);
   
   if (sql != NULL)
     cmd->sql = g_strdup(sql);
 
   cmd->act = act;
-  
-  g_sequence_insert_sorted(deploy.sql_seq, cmd, &cached_sortorder, NULL);
+
+  if (cmd->act == CREP && cmd->mstype == R_COL) {
+    add_column2table(cmd);
+  } else {
+    g_sequence_insert_sorted(deploy.sql_seq, cmd, &cached_sortorder, NULL);
+  }
 
   g_timer_start(deploy.timer);
 
@@ -278,6 +359,7 @@ static void add2deploy(enum action act, const char *path, const char *path2,
 static inline void cut_deploy_sql()
 {
   GSequenceIter *iter = g_sequence_get_begin_iter(deploy.sql_seq);
+  GString *sql = g_string_new(NULL);
   
   while(!g_sequence_iter_is_end(iter)) {
     struct sqlcmd *cmd = g_sequence_get(iter);
@@ -296,11 +378,31 @@ static inline void cut_deploy_sql()
       }
       
     }
+
+    if (cmd->act == CREP && cmd->mstype == D_U) {
+      g_string_append_printf(sql, "%s\n)", cmd->sql);
+      g_free(cmd->sql);
+      cmd->sql = g_strdup(sql->str);
+      g_string_truncate(sql, 0);
+    }
     
     
     iter = g_sequence_iter_next(iter); 
   }
 
+  g_string_free(sql, TRUE);
+}
+
+static gboolean clear_tbl_files(gpointer key, gpointer value,
+				gpointer user_data)
+{
+  if (key != NULL && user_data != NULL) {
+    gchar *path = (gchar *) key, *pathdir = (gchar *) user_data;
+    if (g_str_has_prefix(key, pathdir))
+      return TRUE;
+  }
+
+  return FALSE;
 }
 
 static inline void do_deploy_sql()
@@ -408,30 +510,6 @@ static gpointer deploy_thread(gpointer data) {
 
   return 0;
 }
-
-static void free_sqlcmd_object(gpointer object)
-{
-  if (object == NULL)
-    return ;
-
-  struct sqlcmd *obj = (struct sqlcmd *) object;
-
-  if (obj->path != NULL)
-    g_free(obj->path);
-
-  if (obj->path2 != NULL)
-    g_free(obj->path2);
-
-  if (obj->sql != NULL)
-    g_free(obj->sql);
-
-  if (obj->obj != NULL)
-    free_sqlfs_object(obj->obj);
-
-  if (obj != NULL)
-    g_free(obj);
-}
-
 
 void init_cache(GError **error)
 {
@@ -585,6 +663,7 @@ void create_dir(const char *pathdir, GError **error)
   if (parent == NULL)
     g_set_error(&terr, EENULL, EENULL,
 		"%d: parent is not defined!", __LINE__);
+  GString *sql = g_string_new(NULL);
   
   if (terr == NULL) {
     int level = g_strv_length(parent);
@@ -592,9 +671,12 @@ void create_dir(const char *pathdir, GError **error)
     switch (level) {
     case 1:
       type = D_SCHEMA;
+      g_string_append_printf(sql, "CREATE SCHEMA [%s]", *parent);
       break;
     case 2:
       type = D_U;
+      g_string_append_printf(sql, "CREATE TABLE [%s].[%s] (",
+			     *parent, *(parent + 1));
       break;
     default:
       g_set_error(&terr, EENOTSUP, EENOTSUP,
@@ -609,13 +691,15 @@ void create_dir(const char *pathdir, GError **error)
 
       g_hash_table_insert(cache.app_table, g_strdup(pathdir), obj);
       
-      add2deploy(CREP, pathdir, NULL, obj, NULL);
+      add2deploy(CREP, pathdir, NULL, obj, g_strdup(sql->str));
     }
   }
   
   if (g_strv_length(parent) > 0) {
     g_strfreev(parent);
   }
+
+  g_string_free(sql, TRUE);
 
   if (terr != NULL)
     g_propagate_error(error, terr);
@@ -776,6 +860,14 @@ void remove_object(const char *path, GError **error)
       if (terr == NULL) {
 	add2deploy(DROP, path, NULL, object, sql);
       }
+    }
+
+    // очистить файлы директории из кэша
+    if (object->type < 0x08) {
+      char *p = g_strdup(path);
+      g_hash_table_foreach_remove(cache.app_table, &clear_tbl_files, p);
+      g_hash_table_foreach_remove(cache.db_table, &clear_tbl_files, p);
+      g_free(p);
     }
     
     SAFE_REMOVE_ALL(path);

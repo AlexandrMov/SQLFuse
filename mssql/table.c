@@ -46,13 +46,6 @@ char * create_column_def(const char *schema, const char *table,
 {
   char *result = NULL;
   GString *sql = g_string_new(NULL);
-  g_string_append_printf(sql, "ALTER TABLE %s.%s", schema, table);
-  if (obj->object_id) {
-    g_string_append(sql, " ALTER COLUMN ");
-  }
-  else {
-    g_string_append(sql, " ADD ");
-  }
   g_string_append_printf(sql, "[%s] %s", obj->name, def);
 
   result = g_strdup(sql->str);
@@ -76,7 +69,7 @@ char * create_constr_def(const char *schema, const char *table,
       g_string_append(sql, " WITH CHECK ");
   }
 
-  g_string_append_printf(sql, "ADD CONSTRAINT [%s] ", obj->name);
+  g_string_append_printf(sql, " ADD CONSTRAINT [%s] ", obj->name);
 
   if (obj->type == R_C) {
     g_string_append_printf(sql, "CHECK", def);
@@ -122,7 +115,7 @@ char * make_column_def(struct sqlfs_ms_obj *obj)
   }
 
   if (col->identity) {
-    g_string_append_printf(def, " IDENTITY ('%s', '%s')",
+    g_string_append_printf(def, " IDENTITY (%s, %s)",
 			   col->seed_val, col->inc_val);
     
     if (col->not4repl)

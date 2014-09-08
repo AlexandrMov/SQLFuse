@@ -209,6 +209,7 @@ char * write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
   if (!error && node != NULL) {
     switch (node->type) {
     case COLUMN:
+      obj->type = R_COL;
       wrktext = create_column_def(schema, parent->name, obj,
 				  text + node->first_column - 1);
       break;
