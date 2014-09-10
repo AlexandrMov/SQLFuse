@@ -54,8 +54,19 @@ struct sqlcmd {
   g_sequence_remove_range(g_sequence_get_begin_iter(deploy.sql_seq),	\
 			  g_sequence_get_end_iter(deploy.sql_seq));
 
+#define IS_DIR(object) object->type < 0x08
+#define IS_REG(object) object->type >= 0x08
+
 static struct sqlcache cache;
 static struct sqldeploy deploy;
+
+static inline gboolean is_temp(struct sqlfs_ms_obj *obj)
+{
+  if (obj->type == R_TEMP || obj->is_temp)
+    return TRUE;
+  
+  return FALSE;
+}
 
 static gboolean is_masked(const char *path)
 {
@@ -202,7 +213,7 @@ static inline struct sqlfs_object * ms2sqlfs(struct sqlfs_ms_obj *src)
   result->object_id = src->object_id;
   result->name = g_strdup(src->name);
   
-  if (src->type < 0x08)
+  if (IS_DIR(src))
     result->type = SF_DIR;
   else {
     result->type = SF_REG;
@@ -380,10 +391,16 @@ static inline void cut_deploy_sql()
     }
 
     if (cmd->act == CREP && cmd->mstype == D_U) {
-      g_string_append_printf(sql, "%s\n)", cmd->sql);
+
+      if (g_str_has_suffix(cmd->sql, "("))
+	g_string_append_printf(sql, "-- empty table: %s", cmd->sql);
+      else
+	g_string_append_printf(sql, "%s\n)", cmd->sql);
+      
       g_free(cmd->sql);
       cmd->sql = g_strdup(sql->str);
       g_string_truncate(sql, 0);
+      
     }
     
     
@@ -641,10 +658,18 @@ char * fetch_object_text(const char *path, GError **error)
 
     if (!g_hash_table_contains(cache.app_table, path)
 	&& !is_masked(path)
-	&& object->type != R_TEMP)
+	&& object->type != R_TEMP) {
       text = load_module_text(*schema, object, &terr);
-    else
+
+      if (object->def != NULL)
+	g_free(object->def);
+      
+      object->def = g_strdup(text);
+      object->len = strlen(object->def);
+    }
+    else {
       text = object->def;
+    }
     
     g_strfreev(schema); 
   }
@@ -688,6 +713,7 @@ void create_dir(const char *pathdir, GError **error)
       struct sqlfs_ms_obj *obj = g_try_new0(struct sqlfs_ms_obj, 1);
       obj->type = type;
       obj->name = g_path_get_basename(pathdir);
+      obj->is_temp = TRUE;
 
       g_hash_table_insert(cache.app_table, g_strdup(pathdir), obj);
       
@@ -726,6 +752,7 @@ void create_node(const char *pathfile, GError **error)
     tobj->name = g_path_get_basename(pathfile);
     tobj->type = R_TEMP;
     tobj->def = g_strdup("\0");
+    tobj->is_temp = TRUE;
     
     g_mutex_lock(&cache.m);
     g_hash_table_insert(cache.app_table, g_strdup(pathfile), tobj);
@@ -772,6 +799,7 @@ void write_object(const char *path, const char *buffer, GError **error)
 
 	object->def = g_strdup(buffer);
 	object->len = strlen(object->def);
+	object->is_temp = FALSE;
       }
       else {
 	SAFE_REMOVE_ALL(path);
@@ -806,7 +834,9 @@ void truncate_object(const char *path, off_t offset, GError **error)
     gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
     char *def = NULL;
     if (obj->object_id != 0 && !g_hash_table_contains(cache.app_table, path)) {
-      def = g_strndup(load_module_text(*schema, obj, &terr), offset);
+      char *load = load_module_text(*schema, obj, &terr);
+      def = g_strndup(load, offset);
+      g_free(load);
     }
     else
       if (obj->def != NULL) {
@@ -843,7 +873,6 @@ void truncate_object(const char *path, off_t offset, GError **error)
     g_propagate_error(error, terr);
 }
 
-
 void remove_object(const char *path, GError **error)
 {
   GError *terr = NULL;
@@ -855,7 +884,7 @@ void remove_object(const char *path, GError **error)
 
   if (terr == NULL) {
     struct sqlfs_ms_obj *object = find_cache_obj(path, &terr);
-    if (terr == NULL && object->type != R_TEMP) {
+    if (terr == NULL && !is_temp(object)) {
       char *sql = remove_ms_object(*schema, *(schema + 1), object, &terr);
       if (terr == NULL) {
 	add2deploy(DROP, path, NULL, object, sql);
@@ -863,7 +892,7 @@ void remove_object(const char *path, GError **error)
     }
 
     // очистить файлы директории из кэша
-    if (object->type < 0x08) {
+    if (IS_DIR(object)) {
       char *p = g_strdup(path);
       g_hash_table_foreach_remove(cache.app_table, &clear_tbl_files, p);
       g_hash_table_foreach_remove(cache.db_table, &clear_tbl_files, p);
@@ -898,12 +927,14 @@ void rename_object(const char *oldname, const char *newname, GError **error)
 		"%d: Operation not supported", __LINE__);
   
   // не перемещать между разными уровнями
-  if (g_strv_length(schemaold) != g_strv_length(schemanew))
+  if (terr == NULL &&
+      g_strv_length(schemaold) != g_strv_length(schemanew))
     g_set_error(&terr, EENOTSUP, EENOTSUP,
 		"%d: Operation not supported", __LINE__);
 
   // не перемещать объекты таблиц в другие таблицы
-  if (g_strv_length(schemanew) > 2
+  if (terr == NULL &&
+      g_strv_length(schemanew) > 2
       && g_strcmp0(*(schemanew + 1), *(schemaold + 1)))
     g_set_error(&terr, EENOTSUP, EENOTSUP,
 		"%d: Operation not supported", __LINE__);
@@ -935,8 +966,8 @@ void rename_object(const char *oldname, const char *newname, GError **error)
     struct sqlfs_ms_obj *obj_old = find_cache_obj(oldname, &terr);
     if (obj_new != NULL) {
 
-      if ((obj_new->object_id || is_exists) && obj_new->type != R_TEMP
-	  && (obj_old->type != obj_new->type || obj_old->type != R_TEMP)) {
+      if ((obj_new->object_id || is_exists) && !is_temp(obj_new)
+	  && (obj_old->type != obj_new->type || !is_temp(obj_old))) {
 	char *sql = remove_ms_object(*schemanew, *(schemanew + 1), obj_new, &terr);
 	if (terr == NULL) {
 	  add2deploy(DROP, newname, NULL, obj_new, sql);
@@ -945,7 +976,7 @@ void rename_object(const char *oldname, const char *newname, GError **error)
 
     }
 
-    if (obj_old->type != R_TEMP) {
+    if (!is_temp(obj_old)) {
       gchar *ppold = g_path_get_dirname(oldname);
       struct sqlfs_ms_obj
 	*ppobj_old = find_cache_obj(ppold, &terr);
@@ -958,8 +989,16 @@ void rename_object(const char *oldname, const char *newname, GError **error)
       }
 
       // для старого объекта ещё не был прочитан текст
-      if (g_hash_table_contains(cache.db_table, oldname) && !obj_old->def) {
-	load_module_text(*schemaold, obj_old, &terr);
+      if (g_hash_table_contains(cache.db_table, oldname) && !obj_old->def
+	  && IS_REG(obj_old)) {
+	char *def = load_module_text(*schemaold, obj_old, &terr);
+	if (terr == NULL) {
+	  if (obj_old->def != NULL)
+	    g_free(obj_old->def);
+
+	  obj_old->def = def;
+	  obj_old->len = strlen(def);
+	}
       }
 
       char *sql = rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,

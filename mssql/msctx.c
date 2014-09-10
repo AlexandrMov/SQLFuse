@@ -73,9 +73,14 @@ static int err_handler(DBPROCESS * dbproc, int severity, int dberr, int oserr,
 
 void init_msctx(GError **error)
 {
-  init_context(err_handler, msg_handler, error);
+  GError *terr = NULL;
+  init_context(err_handler, msg_handler, &terr);
+  
   initobjtypes();
   init_checker();
+
+  if (terr != NULL)
+    g_propagate_error(error, terr);
 }
 
 struct sqlfs_ms_obj * find_ms_object(struct sqlfs_ms_obj *parent,
@@ -419,13 +424,9 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
 	g_free(nlspc);
       }
 
-      if (obj->def != NULL)
-	g_free(obj->def);
-      
-      obj->def = g_strdup(sql->str);
-      obj->len = strlen(obj->def);
+      def = g_strdup(sql->str);
     }
-      
+    
   }
   
   close_sql(ctx);
@@ -434,7 +435,7 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
   if (terr != NULL)
     g_propagate_error(error, terr);
 
-  return obj->def;
+  return def;
 }
 
 char * make_module_text(const char *schema, const char *parent,
@@ -631,6 +632,7 @@ GList * fetch_schema_obj(int schema_id, const char *name,
 	obj->object_id = obj_id_buf;
 	obj->ctime = cdate_buf;
 	obj->mtime = mdate_buf;
+	obj->is_temp = FALSE;
 
 	if (obj->type == R_P || obj->type == D_V ||
 	    obj->type == R_FN || obj->type == R_TF) {
@@ -695,6 +697,7 @@ GList * fetch_schemas(const char *name, GError **error)
 	obj->name = g_strdup(g_strchomp(schname_buf));
 	obj->type = D_SCHEMA;
 	obj->schema_id = schid_buf;
+	obj->is_temp = FALSE;
 	lst = g_list_append(lst, obj);
       }
 	break;
