@@ -149,8 +149,6 @@ struct sqlfs_ms_obj {
   
   time_t ctime;
   time_t mtime;
-
-  gboolean is_temp;
 };
 
 

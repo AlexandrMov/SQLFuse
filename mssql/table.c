@@ -191,7 +191,6 @@ GList * fetch_columns(int tid, const char *name, GError **error)
 	obj->name = g_strdup(g_strchomp(colname_buf));
 	obj->type = R_COL;
 	obj->parent_id = tid;
-	obj->is_temp = FALSE;
 	
 	obj->column = g_try_new0(struct sqlfs_ms_column, 1);     
 	obj->column->column_id = col_id_buf;
@@ -288,7 +287,6 @@ GList * fetch_modules(int tid, const char *name, GError **error)
 	trgobj->ctime = cdate_buf;
 	trgobj->mtime = mdate_buf;
 	trgobj->len = def_len_buf;
-	trgobj->is_temp = FALSE;
         
 	list = g_list_append(list, trgobj);
 	break;
@@ -417,7 +415,6 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
 	obj->mtime = mdate_buf;
 	obj->ctime = cdate_buf;
 	obj->type = str2mstype(g_strchomp(type_buf));
-	obj->is_temp = FALSE;
 
 	obj->clmn_ctrt =  g_try_new0(struct sqlfs_ms_constraint, 1);
 
@@ -614,7 +611,6 @@ GList * fetch_foreignes(int tid, const char *name, GError **error)
 	obj->mtime = mdate;
 	obj->ctime = cdate;
 	obj->type = R_F;
-	obj->is_temp = FALSE;
 
 	struct sqlfs_ms_fk *fk = g_try_new0(struct sqlfs_ms_fk, 1);
 	fk->delact = delact;
@@ -882,7 +878,6 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 	obj->name = g_strdup(g_strchomp(name_buf));
 	obj->mtime = mdate_buf;
 	obj->ctime = cdate_buf;
-	obj->is_temp = FALSE;
 	
 	if (is_pk == TRUE)
 	  obj->type = R_PK;

@@ -632,7 +632,6 @@ GList * fetch_schema_obj(int schema_id, const char *name,
 	obj->object_id = obj_id_buf;
 	obj->ctime = cdate_buf;
 	obj->mtime = mdate_buf;
-	obj->is_temp = FALSE;
 
 	if (obj->type == R_P || obj->type == D_V ||
 	    obj->type == R_FN || obj->type == R_TF) {
@@ -697,7 +696,7 @@ GList * fetch_schemas(const char *name, GError **error)
 	obj->name = g_strdup(g_strchomp(schname_buf));
 	obj->type = D_SCHEMA;
 	obj->schema_id = schid_buf;
-	obj->is_temp = FALSE;
+	
 	lst = g_list_append(lst, obj);
       }
 	break;
