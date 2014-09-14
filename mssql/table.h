@@ -17,7 +17,7 @@
   along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "mssqlfs.h"
+#include "msctx.h"
 
 /*
  * Вернёт SQL-запрос, создающий новое поле в таблице
@@ -89,4 +89,3 @@ GList * fetch_constraints(int table_id, const char *name, GError **err);
  * Вернёт список ограничений FOREIGN KEY у таблицы %table_id
  */
 GList * fetch_foreignes(int table_id, const char *name, GError **err);
-

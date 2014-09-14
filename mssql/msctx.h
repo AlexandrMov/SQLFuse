@@ -20,12 +20,12 @@
 #ifndef MSSQLFS_H
 #define MSSQLFS_H
 
-#include <stdlib.h>
-
 #include <sybdb.h>
 #include <sybfront.h>
 
 #include <glib.h>
+
+#include <sqlfuse.h>
 
 #define D_SCHEMA 0x01
 #define D_IT 0x02
@@ -60,21 +60,6 @@
 
 #define D_TEMP 0x11
 #define R_TEMP 0x99
-
-#define EENULL 0x101
-#define EENOTSUP 0x102
-#define EEMEM 0x109
-#define EELOGIN 0x110
-#define EECONN 0x111
-#define EEUSE 0x112
-#define EEINIT 0x113
-#define EEBUSY 0x114
-#define EECMD 0x121
-#define EEXEC 0x122
-#define EERES 0x123
-#define EEFULL 0x124
-#define EENOTFOUND 0x221
-#define EEPARSE 0x222
 
 struct sqlfs_ms_type {
   int sys_type_id;
@@ -164,7 +149,6 @@ struct sqlfs_ms_obj {
   
   time_t ctime;
   time_t mtime;
-  time_t cached_time;
 };
 
 
@@ -176,7 +160,7 @@ void init_msctx(GError **error);
 /*
  * Найти объект
  */
-struct sqlfs_ms_obj * find_ms_object(const struct sqlfs_ms_obj *parent,
+struct sqlfs_ms_obj * find_ms_object(struct sqlfs_ms_obj *parent,
 				     const char *name, GError **error);
 
 /*
@@ -198,6 +182,12 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
 			GError **error);
 
 /*
+ * Сформировать текст модуля
+ */
+char * make_module_text(const char *schema, const char *parent,
+			struct sqlfs_ms_obj *obj, GError **error);
+
+/*
  * Загрузить полный программный текст модуля
  */
 char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
@@ -206,7 +196,7 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
 /*
  * Создать схему с владельцем по умолчанию
  */
-void create_schema(const char *name, GError **error);
+char * create_schema(const char *name, GError **error);
 
 
 /*
@@ -218,21 +208,21 @@ void create_table(const char *schema, const char *name, GError **error);
 /*
  * Создать/записать объект
  */
-void write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
-		     const char *text, struct sqlfs_ms_obj *obj, GError **error);
+char * write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
+		       const char *text, struct sqlfs_ms_obj *obj, GError **error);
 
 /*
  * Переименовать/переместить объект
  */
-void rename_ms_object(const char *schema_old, const char *schema_new,
-		      struct sqlfs_ms_obj *obj_old, struct sqlfs_ms_obj *obj_new,
-		      struct sqlfs_ms_obj *parent, GError **error);
+char * rename_ms_object(const char *schema_old, const char *schema_new,
+			struct sqlfs_ms_obj *obj_old, struct sqlfs_ms_obj *obj_new,
+			struct sqlfs_ms_obj *parent, GError **error);
 
 /*
  * Удалить объект
  */
-void remove_ms_object(const char *schema, const char *parent,
-		      struct sqlfs_ms_obj *obj, GError **error);
+char * remove_ms_object(const char *schema, const char *parent,
+			struct sqlfs_ms_obj *obj, GError **error);
 
 /*
  * Убрать за объектом

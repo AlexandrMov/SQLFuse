@@ -34,10 +34,10 @@ MODULES		+= conf
 
 # MSSQL
 MSSQL_PREFIX	:= ./mssql/
-MSSQL_FILES	:= mssqlfs.c tsqlcheck.c exec.c table.c util.c
+MSSQL_FILES	:= msctx.c tsqlcheck.c exec.c table.c util.c mssql.c
 MSSQL_GEN_FILES	:= tsql.tab.c tsql.parser.c tsql.tab.h tsql.parser.h
-MSSQL_OBJS	:= tsql.tab.o tsql.parser.o mssqlfs.o tsqlcheck.o
-MSSQL_OBJS	+= exec.o table.o util.o
+MSSQL_OBJS	:= tsql.tab.o tsql.parser.o msctx.o tsqlcheck.o
+MSSQL_OBJS	+= exec.o table.o util.o mssql.o
 SRC_FILES	+= $(addprefix $(MSSQL_PREFIX), $(MSSQL_FILES))
 OBJ_FILES	+= $(addprefix $(MSSQL_PREFIX), $(MSSQL_OBJS))
 MODULES		+= mssql
