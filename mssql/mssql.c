@@ -95,9 +95,11 @@ static inline int get_mask_id(const char *path)
   return 0;
 }
 
-static inline void do_mask(const char *path, struct sqlcmd *cmd)
+static void do_mask(const char *path, struct sqlcmd *cmd)
 {
-  g_hash_table_steal(cache.mask_table, path);
+  if (g_hash_table_contains(cache.mask_table, path))
+    g_hash_table_steal(cache.mask_table, path);
+
   g_hash_table_insert(cache.mask_table, g_strdup(path), cmd);
 }
 

@@ -156,8 +156,9 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
       else {
 	g_free(msctx);
       }
+
     }
-    
+
     g_free(npw_sql);
     
   }
