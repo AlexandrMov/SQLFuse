@@ -485,7 +485,9 @@ static inline void do_deploy_sql()
     SAFE_REMOVE_ALL(cmd->path);
 
     if (cmd->sql != NULL && terr == NULL && !cmd->is_disabled) {
+
       exec_sql_cmd(cmd->sql, ctx, &terr);
+      
       // если ошибка, - откатить транзакцию
       if (terr != NULL) {
 	GError *rerr = NULL;

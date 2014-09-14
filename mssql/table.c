@@ -97,7 +97,7 @@ char * make_column_def(struct sqlfs_ms_obj *obj)
   char *text = NULL;
   struct sqlfs_ms_column *col = obj->column;
   GString *def = g_string_new(NULL);
-  g_string_append_printf(def, "COLUMN [%s] %s", obj->name, col->type_name);
+  g_string_append_printf(def, "COLUMN %s", col->type_name);
   
   if (!g_strcmp0(col->type_name, "float"))
     g_string_append_printf(def, "(%d)", col->precision);
@@ -322,7 +322,7 @@ char * make_constraint_def(struct sqlfs_ms_obj *ctrt, const char *def)
   GString *sql = g_string_new(NULL);
   
   if (ctrt->type == R_D) {
-    g_string_append_printf(sql, "CONSTRAINT %s ", ctrt->name);
+    g_string_append(sql, "CONSTRAINT ");
     g_string_append_printf(sql, "DEFAULT %s FOR [%s]", def, ctrt->clmn_ctrt->column_name);
   }
   else
@@ -332,7 +332,7 @@ char * make_constraint_def(struct sqlfs_ms_obj *ctrt, const char *def)
       else
 	g_string_append(sql, "WITH CHECK ");
       
-      g_string_append_printf(sql, "CONSTRAINT %s CHECK ", ctrt->name);
+      g_string_append(sql, "CONSTRAINT CHECK ");
       
       if (ctrt->clmn_ctrt->not4repl == TRUE)
 	g_string_append(sql, "NOT FOR REPLICATION ");
@@ -515,7 +515,7 @@ char * make_foreign_def(struct sqlfs_ms_obj *obj)
   else
     g_string_append(sql, "WITH CHECK ");
   
-  g_string_append_printf(sql, "CONSTRAINT [%s] FOREIGN KEY ", obj->name);
+  g_string_append(sql, "CONSTRAINT FOREIGN KEY ");
   g_string_append_printf(sql, "(%s) ", fk->columns_def);
   g_string_append_printf(sql, "REFERENCES %s (%s)", fk->ref_object_def,
 			 fk->ref_columns_def);
@@ -715,7 +715,7 @@ char * make_index_def(const char *schema, const char *table,
   GString *sql = g_string_new(NULL);
 
   if (obj->type == R_PK || obj->type == R_UQ) {
-    g_string_append_printf(sql, "CONSTRAINT %s ", obj->name);
+    g_string_append(sql, "CONSTRAINT ");
 
     if (obj->type == R_PK)
       g_string_append(sql, "PRIMARY KEY CLUSTERED ");
@@ -728,7 +728,7 @@ char * make_index_def(const char *schema, const char *table,
     if (idx->is_unique)
       g_string_append(sql, "UNIQUE ");
     
-    g_string_append_printf(sql, "NONCLUSTERED INDEX [%s] ", obj->name);
+    g_string_append(sql, "NONCLUSTERED INDEX ");
     g_string_append_printf(sql, "ON [%s].[%s] ", schema, table);
   }
 
