@@ -267,23 +267,21 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
     if (fi->flags & O_CREAT) {
       err = sqlfs_mknod(path, 07777 | S_IFREG, 0);
     }
-  } else if ((fi->flags & O_ACCMODE) == O_RDWR
-	     || (fi->flags & O_ACCMODE) == O_WRONLY)
-    {
-      /*if (fi->flags & O_APPEND) {
-	err = -ENOTSUP;
-	}*/
-      
+  } else {
+    if ((fi->flags & O_ACCMODE) == O_RDWR
+	|| (fi->flags & O_ACCMODE) == O_WRONLY) {
       if ((fi->flags & O_EXCL) && object->object_id)
-	  err = -EACCES;
+	err = -EACCES;
     }
-  else {
-    err = -EIO;
+    else {
+      err = -EIO;
+    }
   }
-
+  
   if (!err) {
-    fi->fh = object->object_id;
-
+    // FIXME: Не надёжная генерация уникальных значений
+    fi->fh = object->object_id + g_get_monotonic_time();
+    
     char *def = fetch_object_text(path, &terr);
     if (def != NULL) {
       sqlfs_file_t *fsfile = g_try_new0(sqlfs_file_t, 1);
@@ -292,6 +290,7 @@ static int sqlfs_open(const char *path, struct fuse_file_info *fi)
       if (def) {
 	fsfile->buffer = g_strdup(def);
       }
+
       g_hash_table_insert(cache.open_table, pfh, fsfile);
     }
 
@@ -310,6 +309,7 @@ static int sqlfs_write(const char *path, const char *buf, size_t size,
 {
   int err = 0;
   sqlfs_file_t *fsfile = g_hash_table_lookup(cache.open_table, &(fi->fh));
+
   if (fsfile && fsfile->buffer) {
     size_t len = strlen(fsfile->buffer);
     if (len < size + offset)
@@ -334,7 +334,6 @@ static int sqlfs_flush(const char *path, struct fuse_file_info *fi)
 
   if (!err) {
     GError *terr = NULL;
-
     if (fsfile->flush == TRUE && strlen(fsfile->buffer) > 0) {
       write_object(path, fsfile->buffer, &terr);
       fsfile->flush = FALSE;

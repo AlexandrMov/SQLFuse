@@ -32,7 +32,7 @@ struct sqlcmd {
   unsigned int mstype;
 
   struct sqlfs_object *obj;
-
+  gboolean is_disabled;
   char *sql;
 };
 
@@ -244,66 +244,17 @@ static void free_sqlcmd_object(gpointer object)
     g_free(obj);
 }
 
-static inline gboolean add_column2table(struct sqlcmd *cmd, struct sqlcmd *icmd)
-{
-  gboolean stop = FALSE;
-  GString *sql = g_string_new(NULL);
-
-  if (icmd->mstype == R_COL && !g_strcmp0(cmd->path, icmd->path)) {
-
-    gchar **schema = g_strsplit(g_path_skip_root(cmd->path),
-				G_DIR_SEPARATOR_S, -1);
-
-    g_string_append_printf(sql, "ALTER TABLE [%s].[%s]", *schema, *(schema + 1));
-    if (cmd->act == CREP) {
-      g_string_append(sql, " ALTER COLUMN ");
-    }
-    else {
-      g_string_append(sql, " ADD ");
-    }
-
-    g_string_append_printf(sql, "%s", cmd->sql);
-    g_free(cmd->sql);
-    cmd->sql = g_strdup(sql->str);
-
-    g_sequence_append(deploy.sql_seq, cmd);
-
-    if (g_strv_length(schema) > 0) {
-      g_strfreev(schema);
-    }
-
-    stop = TRUE;
-
-  }
-
-  if (icmd->act == CREP && icmd->mstype == D_U
-      && g_str_has_prefix(cmd->path, icmd->path)) {
-    
-    if (g_str_has_suffix(icmd->sql, "("))
-      g_string_append_printf(sql, "%s\n\t%s", icmd->sql, cmd->sql);
-    else
-      g_string_append_printf(sql, "%s,\n\t%s", icmd->sql, cmd->sql);
-    
-    g_free(icmd->sql);
-    icmd->sql = g_strdup(sql->str);
-    
-    g_hash_table_remove(cache.mask_table, cmd->path);
-
-    stop = TRUE;
-  }
-  
-
-  g_string_free(sql, TRUE);
-
-  return stop;
-}
-
 static inline struct sqlcmd * start_cache()
 {
   g_mutex_lock(&deploy.lock);
   struct sqlcmd *cmd = g_try_new0(struct sqlcmd, 1);
+  cmd->is_disabled = 0;
   
   return cmd;
+}
+
+static inline void lock_cache() {
+  g_mutex_lock(&deploy.lock);
 }
 
 static inline void end_cache() {
@@ -327,45 +278,98 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
     return ;
   }
 
-  gboolean is_col = TRUE;
+  gboolean stop = TRUE;
+  GString *sql = g_string_new(NULL);
   GSequenceIter *iter = g_sequence_get_end_iter(deploy.sql_seq);
   while(!g_sequence_iter_is_begin(iter)) {
     iter = g_sequence_iter_prev(iter);
     struct sqlcmd *pcmd = g_sequence_get(iter);
 
-    if (cmd->mstype == R_COL && add_column2table(cmd, pcmd)) {
-      do_mask(path, cmd);
-      is_col = FALSE;
+    // включить колонку в таблицу
+    if (pcmd->act == CREP && pcmd->mstype == D_U && cmd->mstype == R_COL
+	&& g_str_has_prefix(cmd->path, pcmd->path)) {
+      
+      if (g_str_has_suffix(pcmd->sql, "("))
+	g_string_append_printf(sql, "%s\n\t%s", pcmd->sql, cmd->sql);
+      else
+	g_string_append_printf(sql, "%s,\n\t%s", pcmd->sql, cmd->sql);
+      
+      g_free(pcmd->sql);
+      pcmd->sql = g_strdup(sql->str);
+
+      cmd->is_disabled = TRUE;
       break;
     }
 
     if (!g_strcmp0(cmd->path, pcmd->path)) {
+
+      // колонка уже включена в состав таблицы, либо редактировалась ранее
+      if (pcmd->mstype == R_COL) {
+	gchar **schema = g_strsplit(g_path_skip_root(cmd->path),
+				    G_DIR_SEPARATOR_S, -1);
+	
+	g_string_append_printf(sql, "ALTER TABLE [%s].[%s]",
+			       *schema, *(schema + 1));
+	if (pcmd->act == CREP) {
+	  g_string_append(sql, " ALTER COLUMN ");
+	}
+	else {
+	  g_string_append(sql, " ADD ");
+	}
+	
+	g_string_append_printf(sql, "%s", cmd->sql);
+	g_free(cmd->sql);
+	cmd->sql = g_strdup(sql->str);
+	
+	if (g_strv_length(schema) > 0) {
+	  g_strfreev(schema);
+	}
+	
+	break;
+      }
+      
+      // удалённый объект имеет разный тип с добавленным
+      // или произошло переименование, - использовать CREATE
       if (pcmd->mstype != obj->type && obj->type != R_TEMP && pcmd->act == DROP
 	  || pcmd->act == RENAME) {
 	obj->object_id = 0;
       }
 
+      // объект удалён, имеет один тип с новым или новый временный, -
+      // информация об удалении не нужна, использовать ALTER
       if ((pcmd->mstype == obj->type || obj->type == R_TEMP)
 	  && pcmd->act == DROP) {
 	obj->object_id = pcmd->obj->object_id;
 	g_sequence_remove(iter);
       }
 
+      // информация об создании пустого объекта не нужна
+      // если новый объект - колонка, возможно, создана с таблицей
       if (cmd->mstype != R_TEMP && pcmd->mstype == R_TEMP
 	  && pcmd->act == CREP) {
 	obj->object_id = pcmd->obj->object_id;
        	g_sequence_remove(iter);
+
+	stop = FALSE;
+      }      
+
+      if (stop) {
+	break;
+      } else {
+	iter = g_sequence_get_end_iter(deploy.sql_seq);
+	stop = TRUE;
       }
       
-      do_mask(path, cmd);
-      break;
     }
+    
   }
 
-  if (is_col)
+  if (stop) {
     g_sequence_append(deploy.sql_seq, cmd);
+    do_mask(path, cmd);
+  }
 
-  end_cache();
+  g_string_free(sql, TRUE);
 }
 
 static struct sqlcmd * drop_object(const char *path, struct sqlcmd *cmd,
@@ -378,8 +382,6 @@ static struct sqlcmd * drop_object(const char *path, struct sqlcmd *cmd,
 
   do_mask(path, cmd);
   g_sequence_append(deploy.sql_seq, cmd);
-
-  end_cache();
 }
 
 static struct sqlcmd * rename_obj(const char *oldname, const char *newname,
@@ -394,8 +396,6 @@ static struct sqlcmd * rename_obj(const char *oldname, const char *newname,
   do_mask(oldname, cmd);
   do_mask(newname, cmd);
   g_sequence_append(deploy.sql_seq, cmd);
-
-  end_cache();
 }
 
 static inline void cut_deploy_sql()
@@ -430,6 +430,21 @@ static inline void cut_deploy_sql()
       cmd->sql = g_strdup(sql->str);
       g_string_truncate(sql, 0);
       
+    }
+
+    if (cmd->act == CREP && cmd->mstype == R_COL && !cmd->is_disabled) {
+      gchar **schema = g_strsplit(g_path_skip_root(cmd->path),
+				  G_DIR_SEPARATOR_S, -1);
+      
+      g_string_append_printf(sql, "ALTER TABLE [%s].[%s]",
+			     *schema, *(schema + 1));
+      g_string_append_printf(sql, " ALTER COLUMN %s", cmd->sql);
+      g_free(cmd->sql);
+      cmd->sql = g_strdup(sql->str);
+      
+      if (g_strv_length(schema) > 0) {
+	g_strfreev(schema);
+      }
     }
     
     iter = g_sequence_iter_next(iter); 
@@ -469,9 +484,7 @@ static inline void do_deploy_sql()
     // в том числе временные схемы и таблицы
     SAFE_REMOVE_ALL(cmd->path);
 
-    g_message("PATH: %s;\nSQL:\n%s\n", cmd->path, cmd->sql);
-
-    if (cmd->sql != NULL && terr == NULL) {
+    if (cmd->sql != NULL && terr == NULL && !cmd->is_disabled) {
       exec_sql_cmd(cmd->sql, ctx, &terr);
       // если ошибка, - откатить транзакцию
       if (terr != NULL) {
@@ -642,9 +655,7 @@ GList * fetch_dir_objects(const char *pathdir, GError **error)
 	: g_strconcat(pathdir, object->name, NULL);
       if (!g_hash_table_contains(cache.app_table, str) && !is_masked(str)) {
 	if (!g_hash_table_contains(cache.db_table, str)) {
-	  g_mutex_lock(&cache.m);
 	  g_hash_table_insert(cache.db_table, g_strdup(str), object);
-	  g_mutex_unlock(&cache.m);
 	}
 	reslist = g_list_append(reslist, ms2sqlfs(object));
       }
@@ -686,9 +697,8 @@ char * fetch_object_text(const char *path, GError **error)
   if (terr == NULL) {
     gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
 
-    if (!g_hash_table_contains(cache.app_table, path)
-	&& !is_masked(path)
-	&& object->type != R_TEMP) {
+    if (!is_masked(path) && !is_temp(object)
+	&& !g_hash_table_contains(cache.app_table, path)) {
       text = load_module_text(*schema, object, &terr);
 
       if (object->def != NULL)
@@ -721,6 +731,8 @@ void create_dir(const char *pathdir, GError **error)
   GString *sql = g_string_new(NULL);
   
   if (terr == NULL) {
+    struct sqlcmd *cmd = start_cache();
+
     int level = g_strv_length(parent);
     unsigned int type = 0;
     switch (level) {
@@ -745,11 +757,14 @@ void create_dir(const char *pathdir, GError **error)
       obj->name = g_path_get_basename(pathdir);
       obj->object_id = 0;
 
-      struct sqlcmd *cmd = start_cache();
       g_hash_table_insert(cache.app_table, g_strdup(pathdir), obj);
       cmd->sql = g_strdup(sql->str);
       crep_object(pathdir, cmd, obj);
+    } else {
+      free_sqlcmd_object(cmd);
     }
+
+    end_cache();
   }
   
   if (g_strv_length(parent) > 0) {
@@ -772,6 +787,7 @@ void create_node(const char *pathfile, GError **error)
 		"%d: parent is not defined!", __LINE__);
   
   if (terr == NULL) {
+    struct sqlcmd *cmd = start_cache();
     struct sqlfs_ms_obj *tobj = g_try_new0(struct sqlfs_ms_obj, 1);
 
     tobj->object_id = get_mask_id(pathfile);
@@ -779,9 +795,10 @@ void create_node(const char *pathfile, GError **error)
     tobj->type = R_TEMP;
     tobj->def = g_strdup("\0");
 
-    struct sqlcmd *cmd = start_cache();
     g_hash_table_insert(cache.app_table, g_strdup(pathfile), tobj);
     crep_object(pathfile, cmd, tobj);
+
+    end_cache();
   }
   
   if (g_strv_length(parent) > 0) {
@@ -805,6 +822,7 @@ void write_object(const char *path, const char *buffer, GError **error)
   
   if (terr == NULL) {
     gchar *pp = g_path_get_dirname(path);
+    struct sqlcmd *cmd = start_cache();
     struct sqlfs_ms_obj *pobj = find_cache_obj(pp, &terr),
       *object = find_cache_obj(path, &terr);
 
@@ -814,7 +832,6 @@ void write_object(const char *path, const char *buffer, GError **error)
     }
 
     if (object && buffer && strlen(buffer) > 0) {
-      struct sqlcmd *cmd = start_cache();
       char *sql = write_ms_object(*schema, pobj, buffer, object, &terr);
       if (terr == NULL && sql != NULL) {
 	if (object->def != NULL)
@@ -822,7 +839,6 @@ void write_object(const char *path, const char *buffer, GError **error)
 
 	object->def = g_strdup(buffer);
 	object->len = strlen(object->def);
-	
 	cmd->sql = sql;
 	crep_object(path, cmd, object);
       }
@@ -831,6 +847,11 @@ void write_object(const char *path, const char *buffer, GError **error)
 	CLEAR_DEPLOY();
       }
     }
+
+    if (!cmd->path)
+      free_sqlcmd_object(cmd);
+    
+    end_cache();
 
     g_free(pp);
   }
@@ -858,6 +879,7 @@ void truncate_object(const char *path, off_t offset, GError **error)
   if (obj != NULL && terr == NULL) {
     gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
     char *def = NULL;
+    struct sqlcmd *cmd = start_cache();
     if (obj->object_id != 0 && !g_hash_table_contains(cache.app_table, path)) {
       char *load = load_module_text(*schema, obj, &terr);
       def = g_strndup(load, offset);
@@ -875,7 +897,6 @@ void truncate_object(const char *path, off_t offset, GError **error)
       obj->def = def;
       obj->len = strlen(obj->def);
       
-      struct sqlcmd *cmd = start_cache();
       cmd->sql = g_strdup(obj->def);
       crep_object(path, cmd, obj);
     }
@@ -885,10 +906,13 @@ void truncate_object(const char *path, off_t offset, GError **error)
     }
 
     if (!g_hash_table_contains(cache.app_table, path)) {
-      g_mutex_lock(&cache.m);
       g_hash_table_insert(cache.app_table, g_strdup(path), obj);
-      g_mutex_unlock(&cache.m);
     }
+
+    if (!cmd->path)
+      free_sqlcmd_object(cmd);
+    
+    end_cache();
 
     if (g_strv_length(schema) > 0) {
       g_strfreev(schema);
@@ -910,9 +934,9 @@ void remove_object(const char *path, GError **error)
 		"%d: parent is not defined!", __LINE__);
 
   if (terr == NULL) {
+    struct sqlcmd *cmd = start_cache();
     struct sqlfs_ms_obj *object = find_cache_obj(path, &terr);
     if (terr == NULL && !is_temp(object)) {
-      struct sqlcmd *cmd = start_cache();
       char *sql = remove_ms_object(*schema, *(schema + 1), object, &terr);
       if (terr == NULL && sql != NULL) {
 	cmd->sql = sql;
@@ -929,6 +953,11 @@ void remove_object(const char *path, GError **error)
     }
     
     SAFE_REMOVE_ALL(path);
+
+    if (!cmd->path)
+      free_sqlcmd_object(cmd);
+    
+    end_cache();
   }
 
   if (g_strv_length(schema) > 0) {
@@ -969,6 +998,8 @@ void rename_object(const char *oldname, const char *newname, GError **error)
 		"%d: Operation not supported", __LINE__);
 
   if (terr == NULL) {
+    lock_cache();
+    
     gboolean is_exists = FALSE;
     struct sqlfs_ms_obj *obj_new = g_hash_table_lookup(cache.app_table, newname);
     
@@ -980,7 +1011,6 @@ void rename_object(const char *oldname, const char *newname, GError **error)
     if (obj_new == NULL) {
       struct sqlcmd *mask = g_hash_table_lookup(cache.mask_table, newname);
       if (mask != NULL && mask->obj->object_id) {
-	g_message("RENAME_FIND");
 	obj_new = do_find(newname, &terr);
       }
 
@@ -999,12 +1029,16 @@ void rename_object(const char *oldname, const char *newname, GError **error)
 
       if (!is_temp(obj_new)
 	  && (obj_old->type != obj_new->type || !is_temp(obj_old))) {
-	struct sqlcmd * cmd = start_cache();
+
+	struct sqlcmd *cmd = g_try_new0(struct sqlcmd, 1);
+	cmd->is_disabled = 0;
+	
 	char *sql = remove_ms_object(*schemanew, *(schemanew + 1), obj_new, &terr);
 	if (terr == NULL && sql != NULL) {
 	  cmd->sql = sql;
 	  drop_object(newname, cmd, obj_new);
 	}
+	
       }
 
     }
@@ -1034,7 +1068,9 @@ void rename_object(const char *oldname, const char *newname, GError **error)
 	}
       }
 
-      struct sqlcmd *cmd = start_cache();
+      struct sqlcmd *cmd = g_try_new0(struct sqlcmd, 1);
+      cmd->is_disabled = 0;
+      
       char *sql = rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,
 				   ppobj_old, &terr);
       if (terr == NULL && sql != NULL) {
@@ -1050,8 +1086,6 @@ void rename_object(const char *oldname, const char *newname, GError **error)
     
     // переименование в кэше
     if (terr == NULL) {
-      g_mutex_lock(&cache.m);
-
       if (g_hash_table_contains(cache.app_table, oldname))
 	g_hash_table_steal(cache.app_table, oldname);
       
@@ -1062,10 +1096,9 @@ void rename_object(const char *oldname, const char *newname, GError **error)
       obj_old->name = g_path_get_basename(newname);
       
       g_hash_table_insert(cache.app_table, g_strdup(newname), obj_old);
-      
-      g_mutex_unlock(&cache.m);
     }
-    
+
+    end_cache();
   }
   
   g_strfreev(schemanew);
