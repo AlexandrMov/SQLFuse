@@ -48,7 +48,6 @@ struct sqlcmd {
 #define CLEAR_DEPLOY()							\
   g_sequence_remove_range(g_sequence_get_begin_iter(deploy.sql_seq),	\
 			  g_sequence_get_end_iter(deploy.sql_seq));	\
-  end_cache();
 
 #define IS_DIR(object) object->type < 0x08
 #define IS_REG(object) object->type >= 0x08
@@ -745,7 +744,7 @@ char * fetch_object_text(const char *path, GError **error)
       if (object->def != NULL)
 	g_free(object->def);
       
-      object->def = g_strdup(text);
+      object->def = text;
       object->len = strlen(object->def);
     }
     else {
@@ -909,6 +908,7 @@ void truncate_object(const char *path, off_t offset, GError **error)
 {
   GError *terr = NULL;
 
+  struct sqlcmd *cmd = start_cache();
   struct sqlfs_ms_obj *obj = g_hash_table_lookup(cache.app_table, path);
   if (!obj) {
     obj = find_cache_obj(path, &terr);
@@ -920,7 +920,6 @@ void truncate_object(const char *path, off_t offset, GError **error)
   if (obj != NULL && terr == NULL) {
     gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
     char *def = NULL;
-    struct sqlcmd *cmd = start_cache();
     if (obj->object_id != 0 && !g_hash_table_contains(cache.app_table, path)) {
       char *load = load_module_text(*schema, obj, &terr);
       def = g_strndup(load, offset);
@@ -952,14 +951,17 @@ void truncate_object(const char *path, off_t offset, GError **error)
 
     if (!cmd->path)
       free_sqlcmd_object(cmd);
-    
-    end_cache();
 
     if (g_strv_length(schema) > 0) {
       g_strfreev(schema);
     }
 
   }
+
+  if (!cmd->path)
+    free_sqlcmd_object(cmd);
+  
+  end_cache();
 
   if (terr != NULL)
     g_propagate_error(error, terr);
