@@ -472,7 +472,12 @@ static inline void cut_deploy_sql()
       
       g_string_append_printf(sql, "ALTER TABLE [%s].[%s]",
 			     *schema, *(schema + 1));
-      g_string_append_printf(sql, " ALTER COLUMN %s", cmd->sql);
+      
+      if (is_masked(cmd->path))
+	g_string_append_printf(sql, " ALTER COLUMN %s", cmd->sql);
+      else
+	g_string_append_printf(sql, " ADD %s", cmd->sql);
+      
       g_free(cmd->sql);
       cmd->sql = g_strdup(sql->str);
       

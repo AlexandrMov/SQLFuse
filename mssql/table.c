@@ -110,8 +110,13 @@ char * make_column_def(struct sqlfs_ms_obj *obj)
       || g_str_has_suffix(col->type_name, "binary")) {
     if (col->max_len < 0)
       g_string_append(def, "(MAX)");
-    else
-      g_string_append_printf(def, "(%d)", col->max_len);
+    else {
+      if (!g_strcmp0(col->type_name, "nvarchar")
+	  || !g_strcmp0(col->type_name, "nchar"))
+	g_string_append_printf(def, "(%d)", col->max_len / 2);
+      else
+	g_string_append_printf(def, "(%d)", col->max_len);
+    }
   }
 
   if (col->identity) {

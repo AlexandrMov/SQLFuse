@@ -452,7 +452,7 @@ char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
   case R_UQ:
   case R_X:
   case R_F:
-    def = obj->def;
+    def = g_strdup(obj->def);
     break;
   default:
     def = load_help_text(parent, obj, &terr);
