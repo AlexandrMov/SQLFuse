@@ -53,6 +53,9 @@ struct sqlcmd {
 #define IS_DIR(object) object->type < 0x08
 #define IS_REG(object) object->type >= 0x08
 
+#define IS_SCHOBJ(object) (object->type >= R_FN && object->type <= R_P	\
+			   || object->type == R_FT || object->type == R_TF)
+
 static struct sqlcache cache;
 static struct sqldeploy deploy;
 
@@ -380,6 +383,34 @@ static struct sqlcmd * drop_object(const char *path, struct sqlcmd *cmd,
   cmd->mstype = obj->type;
   cmd->act = DROP;
 
+  if (IS_DIR(obj)) {
+    GSequenceIter *iter = g_sequence_get_end_iter(deploy.sql_seq);
+    gboolean is_remove = FALSE;
+    while(!g_sequence_iter_is_begin(iter)) {
+      iter = g_sequence_iter_prev(iter);
+      struct sqlcmd *pcmd = g_sequence_get(iter);
+
+      // оставить операции над таблицами и модулями
+      if (cmd->mstype == D_SCHEMA && pcmd->mstype != D_U
+	  && IS_SCHOBJ(obj) && g_str_has_prefix(pcmd->path, cmd->path)) {
+	is_remove = TRUE;
+      }
+
+      // оставить только операции над ограничениями FK
+      if (cmd->mstype == D_U && g_str_has_prefix(pcmd->path, cmd->path)
+	  && pcmd->mstype != R_F) {
+	is_remove = TRUE;
+      }
+
+      if (is_remove) {
+	g_sequence_remove(iter);
+	iter = g_sequence_get_end_iter(deploy.sql_seq);
+	is_remove = FALSE;
+      }
+      
+    }
+  }
+  
   do_mask(path, cmd);
   g_sequence_append(deploy.sql_seq, cmd);
 }
@@ -392,7 +423,7 @@ static struct sqlcmd * rename_obj(const char *oldname, const char *newname,
   cmd->obj = ms2sqlfs(obj);
   cmd->mstype = obj->type;
   cmd->act = RENAME;
-
+  
   do_mask(oldname, cmd);
   do_mask(newname, cmd);
   g_sequence_append(deploy.sql_seq, cmd);
@@ -432,7 +463,8 @@ static inline void cut_deploy_sql()
       
     }
 
-    if (cmd->act == CREP && cmd->mstype == R_COL && !cmd->is_disabled) {
+    if (cmd->act == CREP && cmd->mstype == R_COL && !cmd->is_disabled
+	&& !g_str_has_prefix(cmd->sql, "ALTER TABLE")) {
       gchar **schema = g_strsplit(g_path_skip_root(cmd->path),
 				  G_DIR_SEPARATOR_S, -1);
       

@@ -438,31 +438,6 @@ static inline char * load_help_text(const char *parent, struct sqlfs_ms_obj *obj
   return def;
 }
 
-char * make_module_text(const char *schema, const char *parent,
-			struct sqlfs_ms_obj *obj, GError **error)
-{
-  GError *terr = NULL;
-  char *def = obj->def;
-  
-  switch(obj->type) {
-  case R_COL:
-    def = make_column_def(obj);
-    break;
-  case R_C:
-  case R_D:
-  case R_PK:
-  case R_UQ:
-  case R_X:
-  case R_F:
-    break;
-  }
-  
-  if (terr != NULL)
-    g_propagate_error(error, terr);
-
-  return def;
-}
-
 char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
 			GError **error)
 {

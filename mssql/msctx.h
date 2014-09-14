@@ -182,12 +182,6 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
 			GError **error);
 
 /*
- * Сформировать текст модуля
- */
-char * make_module_text(const char *schema, const char *parent,
-			struct sqlfs_ms_obj *obj, GError **error);
-
-/*
  * Загрузить полный программный текст модуля
  */
 char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
