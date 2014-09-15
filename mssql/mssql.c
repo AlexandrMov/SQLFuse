@@ -277,6 +277,7 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
   cmd->act = CREP;
   
   if (IS_DIR(obj)) {
+    do_mask(path, cmd);
     g_sequence_append(deploy.sql_seq, cmd);
     end_cache();
     return ;
@@ -886,11 +887,12 @@ void write_object(const char *path, const char *buffer, GError **error)
 	SAFE_REMOVE_ALL(path);
 	CLEAR_DEPLOY();
       }
+
     }
 
     if (!cmd->path)
       free_sqlcmd_object(cmd);
-    
+
     end_cache();
 
     g_free(pp);
@@ -948,9 +950,6 @@ void truncate_object(const char *path, off_t offset, GError **error)
     if (!g_hash_table_contains(cache.app_table, path)) {
       g_hash_table_insert(cache.app_table, g_strdup(path), obj);
     }
-
-    if (!cmd->path)
-      free_sqlcmd_object(cmd);
 
     if (g_strv_length(schema) > 0) {
       g_strfreev(schema);
