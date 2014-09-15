@@ -187,17 +187,6 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
 char * load_module_text(const char *parent, struct sqlfs_ms_obj *obj,
 			GError **error);
 
-/*
- * Создать схему с владельцем по умолчанию
- */
-char * create_schema(const char *name, GError **error);
-
-
-/*
- * Создать таблицу с столбцом идентификатором
- */
-void create_table(const char *schema, const char *name, GError **error);
-
 
 /*
  * Создать/записать объект

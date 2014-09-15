@@ -58,9 +58,6 @@ static void load_from_file(GKeyFile *keyfile, const char *group, GError **error)
 
   ADD_KEYBOOL(sqlctx->ansi_npw, "ansi_npw");
 
-  ADD_KEYVAL(sqlctx->defcol, "default_column");
-  ADD_KEYBOOL(sqlctx->merge_names, "merge_names");
-
   ADD_KEYINT(sqlctx->depltime, "deploy_time");
 
   if (g_key_file_has_key(keyfile, group, "auth", &terr))
@@ -186,9 +183,6 @@ void close_keyfile()
     if (sqlctx->auth != NULL)
       g_free(sqlctx->auth);
     
-    if (sqlctx->defcol != NULL)
-      g_free(sqlctx->defcol);
-
     if (sqlctx->excl_sch != NULL && g_strv_length(sqlctx->excl_sch) > 0)
       g_strfreev(sqlctx->excl_sch);
 
