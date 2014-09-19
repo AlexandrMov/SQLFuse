@@ -140,10 +140,10 @@ char * write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
 
   YY_BUFFER_STATE bp;
   bp = yy_scan_string(text);
-  yy_switch_to_buffer(bp);  
+  yy_switch_to_buffer(bp);
   error = yyparse();
   objnode_t *node = NULL;
-  
+
   if (!error)
     node = get_node();
   
@@ -270,6 +270,7 @@ char * remove_ms_object(const char *schema, const char *parent,
     case R_FN:
     case R_FT:
     case R_FS:
+    case R_TF:
       g_string_append(sql, "FUNCTION");
       break;
     case R_P:
@@ -429,6 +430,7 @@ char * rename_ms_object(const char *schema_old, const char *schema_new,
       case R_FN:
       case R_FS:
       case R_FT:
+      case R_TF:
 	g_string_append_printf(sql, "ALTER SCHEMA [%s] TRANSFER [%s].[%s];\n",
 			       schema_new, schema_old, obj_old->name);
 	wrksch = schema_new;
@@ -544,8 +546,8 @@ GList * fetch_schema_obj(int schema_id, const char *name,
 	obj->ctime = cdate_buf;
 	obj->mtime = mdate_buf;
 
-	if (obj->type == R_P || obj->type == D_V ||
-	    obj->type == R_FN || obj->type == R_TF) {
+	if (obj->type == R_P || obj->type == R_FT || obj->type == R_FS
+	    || obj->type == R_FN || obj->type == R_TF) {
 	  obj->len = def_len_buf;
 	}
 	lst = g_list_append(lst, obj);
@@ -732,6 +734,8 @@ void free_ms_obj(gpointer msobj)
 
   if (obj != NULL)
     g_free(obj);
+
+  obj = NULL;
 }
 
 void close_msctx(GError **error)

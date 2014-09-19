@@ -48,6 +48,7 @@ struct sqlcmd {
 #define CLEAR_DEPLOY()							\
   g_sequence_remove_range(g_sequence_get_begin_iter(deploy.sql_seq),	\
 			  g_sequence_get_end_iter(deploy.sql_seq));	\
+  g_hash_table_remove_all(cache.mask_table);
 
 #define IS_DIR(object) object->type < 0x08
 #define IS_REG(object) object->type >= 0x08
@@ -80,18 +81,45 @@ static inline gboolean is_masked(const char *path)
   return FALSE;
 }
 
-static inline int get_mask_id(const char *path)
+static int get_mask_id(const char *path)
 {
+  gboolean res = FALSE;
+  int obj_id = 0;
   struct sqlcmd *cmd = g_hash_table_lookup(cache.mask_table, path);
-  if (cmd != NULL && cmd->obj != NULL) {
+  if (cmd != NULL) {
 
-    if (cmd->act == RENAME && !g_strcmp0(cmd->path, path))
-      return 0;
+    if (cmd->act == CREP) {
+      obj_id = cmd->obj->object_id;
+      res = TRUE;
+    }
+
+    if (cmd->act == RENAME && g_strcmp0(cmd->path, path)) {
+      obj_id = cmd->obj->object_id;
+      res = TRUE;
+    }
+      
+  }
+  else {
     
-    return cmd->obj->object_id;
+    struct sqlfs_ms_obj *obj = g_hash_table_lookup(cache.db_table, path);
+    if (obj) {
+      obj_id = obj->object_id;
+      res = TRUE;
+    }
+    else {
+      obj = g_hash_table_lookup(cache.app_table, path);
+      if (obj && obj->type != R_TEMP) {
+	obj_id = obj->object_id;
+	res = TRUE;
+      }
+    }
+    
   }
 
-  return 0;
+  if (res && !obj_id)
+    obj_id = g_get_monotonic_time();
+
+  return obj_id;
 }
 
 static void do_mask(const char *path, struct sqlcmd *cmd)
@@ -244,8 +272,11 @@ static void free_sqlcmd_object(gpointer object)
   if (obj->obj != NULL)
     free_sqlfs_object(obj->obj);
 
-  if (obj != NULL)
+  if (obj != NULL) {
     g_free(obj);
+    obj = NULL;
+  }
+  
 }
 
 static inline struct sqlcmd * start_cache()
@@ -309,12 +340,13 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
     if (!g_strcmp0(cmd->path, pcmd->path)) {
 
       // колонка уже включена в состав таблицы, либо редактировалась ранее
-      if (pcmd->mstype == R_COL) {
+      if (pcmd->mstype == R_COL && pcmd->act != DROP) {
 	gchar **schema = g_strsplit(g_path_skip_root(cmd->path),
 				    G_DIR_SEPARATOR_S, -1);
 	
 	g_string_append_printf(sql, "ALTER TABLE [%s].[%s]",
 			       *schema, *(schema + 1));
+
 	if (pcmd->act == CREP) {
 	  g_string_append(sql, " ALTER COLUMN ");
 	}
@@ -353,9 +385,15 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
       if (cmd->mstype != R_TEMP && pcmd->mstype == R_TEMP
 	  && pcmd->act == CREP) {
 	obj->object_id = pcmd->obj->object_id;
-       	g_sequence_remove(iter);
 
-	stop = FALSE;
+	if (!obj->object_id)
+	  obj->object_id = g_get_monotonic_time();
+
+       	g_sequence_remove(iter);
+	g_hash_table_remove(cache.mask_table, cmd->path);
+
+	if (cmd->mstype == R_COL)
+	  stop = FALSE;
       }      
 
       if (stop) {
@@ -370,6 +408,31 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
   }
 
   if (stop) {
+
+    // колонка добавляется/редактируется впервые
+    if (cmd->mstype == R_COL && !cmd->is_disabled
+	&& !g_str_has_prefix(cmd->sql, "ALTER TABLE")) {
+      gchar **schema = g_strsplit(g_path_skip_root(cmd->path),
+				  G_DIR_SEPARATOR_S, -1);
+      
+      g_string_append_printf(sql, "ALTER TABLE [%s].[%s]",
+			     *schema, *(schema + 1));
+      
+      if (get_mask_id(cmd->path))
+	g_string_append_printf(sql, " ALTER COLUMN %s", cmd->sql);
+      else
+	g_string_append_printf(sql, " ADD %s", cmd->sql);
+      
+      g_free(cmd->sql);
+      cmd->sql = g_strdup(sql->str);
+      
+      if (g_strv_length(schema) > 0) {
+	g_strfreev(schema);
+      }
+      
+      g_string_truncate(sql, 0);
+    }
+    
     g_sequence_append(deploy.sql_seq, cmd);
     do_mask(path, cmd);
   }
@@ -438,19 +501,6 @@ static inline void cut_deploy_sql()
   
   while(!g_sequence_iter_is_end(iter)) {
     struct sqlcmd *cmd = g_sequence_get(iter);
-    if (!g_sequence_iter_is_begin(iter)) {
-      GSequenceIter *prev = g_sequence_iter_prev(iter);
-      struct sqlcmd *pcmd = g_sequence_get(prev);
-
-      if (pcmd->obj != NULL && cmd->obj != NULL) {
-	
-	//оставить крайнее действие из последовательности одинаковых
-	if (pcmd->act == cmd->act && pcmd->mstype == cmd->mstype
-	    && !g_strcmp0(pcmd->path, cmd->path))
-	  g_sequence_remove(prev);
-      }
-      
-    }
 
     if (cmd->act == CREP && cmd->mstype == D_U) {
 
@@ -463,30 +513,6 @@ static inline void cut_deploy_sql()
       cmd->sql = g_strdup(sql->str);
       g_string_truncate(sql, 0);
       
-    }
-
-    if (cmd->act == CREP && cmd->mstype == R_COL && !cmd->is_disabled
-	&& !g_str_has_prefix(cmd->sql, "ALTER TABLE")) {
-
-      gchar **schema = g_strsplit(g_path_skip_root(cmd->path),
-				  G_DIR_SEPARATOR_S, -1);
-      
-      g_string_append_printf(sql, "ALTER TABLE [%s].[%s]",
-			     *schema, *(schema + 1));
-      
-      if (get_mask_id(cmd->path))
-	g_string_append_printf(sql, " ALTER COLUMN %s", cmd->sql);
-      else
-	g_string_append_printf(sql, " ADD %s", cmd->sql);
-      
-      g_free(cmd->sql);
-      cmd->sql = g_strdup(sql->str);
-      
-      if (g_strv_length(schema) > 0) {
-	g_strfreev(schema);
-      }
-      
-      g_string_truncate(sql, 0);
     }
     
     iter = g_sequence_iter_next(iter); 
@@ -537,7 +563,7 @@ static inline void do_deploy_sql()
 	g_string_truncate(sql, 0);
 	g_string_append(sql, "IF @@TRANCOUNT > 0");
 	g_string_append(sql, " ROLLBACK TRANSACTION\n");
-	
+
 	exec_sql_cmd(sql->str, ctx, &rerr);
 
 	if (rerr != NULL) {
@@ -643,6 +669,9 @@ void init_cache(GError **error)
 
 struct sqlfs_object * find_object(const char *pathfile, GError **error)
 {
+  // отключаем таймер деплоя на время выборки из БД
+  g_timer_stop(deploy.timer);
+  
   GError *terr = NULL;
   struct sqlfs_object *result;
   struct sqlfs_ms_obj *obj = find_cache_obj(pathfile, &terr);
@@ -654,6 +683,8 @@ struct sqlfs_object * find_object(const char *pathfile, GError **error)
   if (terr == NULL) {
     result = ms2sqlfs(obj);
   }
+
+  g_timer_continue(deploy.timer);
   
   if (terr != NULL)
     g_propagate_error(error, terr); 
@@ -668,7 +699,10 @@ GList * fetch_dir_objects(const char *pathdir, GError **error)
   GError *terr = NULL;
   struct sqlfs_ms_obj *object = NULL;
   int nschema = g_strcmp0(pathdir, G_DIR_SEPARATOR_S);
-  
+
+  // отключаем таймер деплоя на время выборки из БД
+  g_timer_stop(deploy.timer);
+
   // получить объекты в соответствии с уровнем
   if (!nschema) {
     wrk = fetch_schemas(NULL, &terr);
@@ -724,6 +758,8 @@ GList * fetch_dir_objects(const char *pathdir, GError **error)
     g_mutex_unlock(&cache.m);
 
   }
+
+  g_timer_continue(deploy.timer);
   
   if (terr != NULL)
     g_propagate_error(error, terr);
@@ -734,8 +770,11 @@ GList * fetch_dir_objects(const char *pathdir, GError **error)
 char * fetch_object_text(const char *path, GError **error)
 {
   char *text = NULL;
-
   GError *terr = NULL;
+  
+  // отключаем таймер деплоя на время выборки из БД
+  g_timer_stop(deploy.timer);
+  
   struct sqlfs_ms_obj *object = find_cache_obj(path, &terr);
 
   if (terr == NULL) {
@@ -757,6 +796,8 @@ char * fetch_object_text(const char *path, GError **error)
     
     g_strfreev(schema); 
   }
+
+  g_timer_continue(deploy.timer);
   
   if (terr != NULL)
     g_propagate_error(error, terr);
@@ -854,7 +895,6 @@ void create_node(const char *pathfile, GError **error)
   
 }
 
-
 void write_object(const char *path, const char *buffer, GError **error)
 {
   GError *terr = NULL;
@@ -878,6 +918,7 @@ void write_object(const char *path, const char *buffer, GError **error)
     if (object && buffer && strlen(buffer) > 0) {
       char *sql = write_ms_object(*schema, pobj, buffer, object, &terr);
       if (terr == NULL && sql != NULL) {
+	
 	if (object->def != NULL)
 	  g_free(object->def);
 
@@ -935,8 +976,10 @@ void truncate_object(const char *path, off_t offset, GError **error)
 	def = g_strndup(obj->def, offset);
       }
 
-    if (obj->def != NULL)
+    if (obj->def != NULL) {
       g_free(obj->def);
+      def = NULL;
+    }
 
     if (offset > 0 && def != NULL) {
       obj->def = def;
@@ -1171,6 +1214,8 @@ void free_sqlfs_object(gpointer object)
   
   if (obj != NULL)
     g_free(obj);
+
+  obj = NULL;
 }
 
 
