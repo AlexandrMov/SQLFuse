@@ -271,6 +271,7 @@ char * remove_ms_object(const char *schema, const char *parent,
     case R_FT:
     case R_FS:
     case R_TF:
+    case R_IF:
       g_string_append(sql, "FUNCTION");
       break;
     case R_P:
@@ -431,6 +432,7 @@ char * rename_ms_object(const char *schema_old, const char *schema_new,
       case R_FS:
       case R_FT:
       case R_TF:
+      case R_IF:
 	g_string_append_printf(sql, "ALTER SCHEMA [%s] TRANSFER [%s].[%s];\n",
 			       schema_new, schema_old, obj_old->name);
 	wrksch = schema_new;
@@ -547,7 +549,7 @@ GList * fetch_schema_obj(int schema_id, const char *name,
 	obj->mtime = mdate_buf;
 
 	if (obj->type == R_P || obj->type == R_FT || obj->type == R_FS
-	    || obj->type == R_FN || obj->type == R_TF) {
+	    || obj->type == R_FN || obj->type == R_TF || obj->type == R_IF) {
 	  obj->len = def_len_buf;
 	}
 	lst = g_list_append(lst, obj);
@@ -692,9 +694,10 @@ void free_ms_obj(gpointer msobj)
     }
     break;
   case R_P:
-  case D_V:
   case R_FN:
   case R_TF:
+  case R_IF:
+  case R_FT:
     if (obj->sql_module != NULL) {
       
       g_free(obj->sql_module);

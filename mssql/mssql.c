@@ -110,7 +110,7 @@ static int get_mask_id(const char *path)
       obj = g_hash_table_lookup(cache.app_table, path);
       if (obj && obj->type != R_TEMP) {
 	obj_id = obj->object_id;
-	res = TRUE;
+	res = FALSE;
       }
     }
     
@@ -310,7 +310,6 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
   if (IS_DIR(obj)) {
     do_mask(path, cmd);
     g_sequence_append(deploy.sql_seq, cmd);
-    end_cache();
     return ;
   }
 
@@ -385,9 +384,6 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
       if (cmd->mstype != R_TEMP && pcmd->mstype == R_TEMP
 	  && pcmd->act == CREP) {
 	obj->object_id = pcmd->obj->object_id;
-
-	if (!obj->object_id)
-	  obj->object_id = g_get_monotonic_time();
 
        	g_sequence_remove(iter);
 	g_hash_table_remove(cache.mask_table, cmd->path);
@@ -498,10 +494,10 @@ static inline void cut_deploy_sql()
 {
   GSequenceIter *iter = g_sequence_get_begin_iter(deploy.sql_seq);
   GString *sql = g_string_new(NULL);
-  
+
   while(!g_sequence_iter_is_end(iter)) {
     struct sqlcmd *cmd = g_sequence_get(iter);
-
+    
     if (cmd->act == CREP && cmd->mstype == D_U) {
 
       if (g_str_has_suffix(cmd->sql, "("))
@@ -593,18 +589,6 @@ static inline void do_deploy_sql()
 			  g_sequence_get_end_iter(deploy.sql_seq));
 }
 
-static gboolean clear_rtemp_files(gpointer key, gpointer value,
-				  gpointer user_data)
-{
-  if (value != NULL) {
-    struct sqlfs_ms_obj *obj = (struct sqlfs_ms_obj *) value;
-    if (obj->type == R_TEMP)
-      return TRUE;
-  }
-
-  return FALSE;
-}
-
 static gpointer deploy_thread(gpointer data) {
   while (deploy.run) {
     g_mutex_lock(&deploy.lock);
@@ -626,8 +610,8 @@ static gpointer deploy_thread(gpointer data) {
       // очистить маскировку
       g_hash_table_remove_all(cache.mask_table);
 
-      // очистить временные регулярные файлы
-      g_hash_table_foreach_remove(cache.app_table, &clear_rtemp_files, NULL);
+      // очистить APP-кэш
+      g_hash_table_remove_all(cache.app_table);
       
       g_timer_stop(deploy.timer);
       g_mutex_unlock(&deploy.lock);
