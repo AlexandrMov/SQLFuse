@@ -54,7 +54,8 @@ struct sqlcmd {
 #define IS_REG(object) object->type >= 0x08
 
 #define IS_SCHOBJ(object) (object->type >= R_FN && object->type <= R_P	\
-			   || object->type == R_FT || object->type == R_TF)
+			   || object->type == R_FT || object->type == R_TF \
+			   || object->type == R_IF)
 
 static struct sqlcache cache;
 static struct sqldeploy deploy;
@@ -90,12 +91,16 @@ static int get_mask_id(const char *path)
 
     if (cmd->act == CREP) {
       obj_id = cmd->obj->object_id;
-      res = TRUE;
+
+      if (cmd->mstype != R_TEMP)
+	res = TRUE;
     }
 
     if (cmd->act == RENAME && g_strcmp0(cmd->path, path)) {
       obj_id = cmd->obj->object_id;
-      res = TRUE;
+      
+      if (cmd->mstype != R_TEMP)
+	res = TRUE;
     }
       
   }
@@ -108,9 +113,8 @@ static int get_mask_id(const char *path)
     }
     else {
       obj = g_hash_table_lookup(cache.app_table, path);
-      if (obj && obj->type != R_TEMP) {
+      if (obj) {
 	obj_id = obj->object_id;
-	res = FALSE;
       }
     }
     
@@ -304,15 +308,8 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
 {
   cmd->path = g_strdup(path);
   cmd->mstype = obj->type;
-  cmd->obj = ms2sqlfs(obj);
   cmd->act = CREP;
   
-  if (IS_DIR(obj)) {
-    do_mask(path, cmd);
-    g_sequence_append(deploy.sql_seq, cmd);
-    return ;
-  }
-
   gboolean stop = TRUE;
   GString *sql = g_string_new(NULL);
   GSequenceIter *iter = g_sequence_get_end_iter(deploy.sql_seq);
@@ -377,6 +374,12 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
 	  && pcmd->act == DROP) {
 	obj->object_id = pcmd->obj->object_id;
 	g_sequence_remove(iter);
+
+	// не пересоздавать схемы/таблицы
+	if (IS_DIR(obj)) {
+	  stop = FALSE;
+	  break;
+	}
       }
 
       // информация об создании пустого объекта не нужна
@@ -387,10 +390,9 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
 
        	g_sequence_remove(iter);
 	g_hash_table_remove(cache.mask_table, cmd->path);
-
-	if (cmd->mstype == R_COL)
-	  stop = FALSE;
-      }      
+	
+	stop = FALSE;
+      }
 
       if (stop) {
 	break;
@@ -403,6 +405,8 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
     
   }
 
+  cmd->obj = ms2sqlfs(obj);
+  
   if (stop) {
 
     // колонка добавляется/редактируется впервые
@@ -413,7 +417,7 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
       
       g_string_append_printf(sql, "ALTER TABLE [%s].[%s]",
 			     *schema, *(schema + 1));
-      
+
       if (get_mask_id(cmd->path))
 	g_string_append_printf(sql, " ALTER COLUMN %s", cmd->sql);
       else
@@ -430,8 +434,9 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
     }
     
     g_sequence_append(deploy.sql_seq, cmd);
-    do_mask(path, cmd);
   }
+
+  do_mask(path, cmd);
 
   g_string_free(sql, TRUE);
 }
@@ -497,7 +502,7 @@ static inline void cut_deploy_sql()
 
   while(!g_sequence_iter_is_end(iter)) {
     struct sqlcmd *cmd = g_sequence_get(iter);
-    
+
     if (cmd->act == CREP && cmd->mstype == D_U) {
 
       if (g_str_has_suffix(cmd->sql, "("))
@@ -859,7 +864,7 @@ void create_node(const char *pathfile, GError **error)
     struct sqlcmd *cmd = start_cache();
     struct sqlfs_ms_obj *tobj = g_try_new0(struct sqlfs_ms_obj, 1);
 
-    tobj->object_id = get_mask_id(pathfile);
+    tobj->object_id = 0;
     tobj->name = g_path_get_basename(pathfile);
     tobj->type = R_TEMP;
     tobj->def = g_strdup("\0");
@@ -900,6 +905,7 @@ void write_object(const char *path, const char *buffer, GError **error)
     }
 
     if (object && buffer && strlen(buffer) > 0) {
+      object->object_id = get_mask_id(path);
       char *sql = write_ms_object(*schema, pobj, buffer, object, &terr);
       if (terr == NULL && sql != NULL) {
 	
