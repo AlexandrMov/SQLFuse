@@ -129,6 +129,8 @@ char * make_column_def(struct sqlfs_ms_obj *obj)
   
   if (!col->nullable)
     g_string_append(def, " NOT NULL");
+  else
+    g_string_append(def, " NULL");
   
   text = g_strconcat(def->str, "\n", NULL);
   g_string_free(def, TRUE);

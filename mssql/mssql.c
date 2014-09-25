@@ -32,7 +32,10 @@ struct sqlcmd {
   unsigned int mstype;
 
   struct sqlfs_object *obj;
+
   gboolean is_disabled;
+  gboolean is_identity;
+  
   char *sql;
 };
 
@@ -288,6 +291,7 @@ static inline struct sqlcmd * start_cache()
   g_mutex_lock(&deploy.lock);
   struct sqlcmd *cmd = g_try_new0(struct sqlcmd, 1);
   cmd->is_disabled = 0;
+  cmd->is_identity = 0;
   
   return cmd;
 }
@@ -308,6 +312,10 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
 {
   cmd->path = g_strdup(path);
   cmd->mstype = obj->type;
+  
+  if (obj->type == R_COL && obj->column)
+    cmd->is_identity = obj->column->identity;
+    
   cmd->act = CREP;
   
   gboolean stop = TRUE;
@@ -368,10 +376,22 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
 	obj->object_id = 0;
       }
 
+      // колонки IDENTITY всегда пересоздаются
+      if (pcmd->is_identity && pcmd->act == DROP && pcmd->mstype != R_TEMP) {
+	cmd->is_identity = TRUE;
+	
+	if (!obj->column)
+	  obj->column = g_try_new0(struct sqlfs_ms_column, 1);
+	
+	obj->column->identity = TRUE;
+	
+	break;
+      }
+      
       // объект удалён, имеет один тип с новым или новый временный, -
       // информация об удалении не нужна, использовать ALTER
       if ((pcmd->mstype == obj->type || obj->type == R_TEMP)
-	  && pcmd->act == DROP) {
+	  && pcmd->act == DROP && !pcmd->is_identity) {
 	obj->object_id = pcmd->obj->object_id;
 	g_sequence_remove(iter);
 
@@ -422,7 +442,7 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
 	g_string_append_printf(sql, " ALTER COLUMN %s", cmd->sql);
       else
 	g_string_append_printf(sql, " ADD %s", cmd->sql);
-      
+
       g_free(cmd->sql);
       cmd->sql = g_strdup(sql->str);
       
@@ -447,6 +467,10 @@ static struct sqlcmd * drop_object(const char *path, struct sqlcmd *cmd,
   cmd->path = g_strdup(path);
   cmd->obj = ms2sqlfs(obj);
   cmd->mstype = obj->type;
+  
+  if (obj->type == R_COL)
+    cmd->is_identity = obj->column->identity;
+  
   cmd->act = DROP;
 
   if (IS_DIR(obj)) {
@@ -459,21 +483,15 @@ static struct sqlcmd * drop_object(const char *path, struct sqlcmd *cmd,
       // оставить операции над таблицами и модулями
       if (cmd->mstype == D_SCHEMA && pcmd->mstype != D_U
 	  && IS_SCHOBJ(obj) && g_str_has_prefix(pcmd->path, cmd->path)) {
-	is_remove = TRUE;
+	pcmd->is_disabled = TRUE;
       }
 
       // оставить только операции над ограничениями FK
       if (cmd->mstype == D_U && g_str_has_prefix(pcmd->path, cmd->path)
-	  && pcmd->mstype != R_F) {
-	is_remove = TRUE;
+	  && pcmd->mstype != R_F && !pcmd->is_identity) {
+	pcmd->is_disabled = TRUE;
       }
 
-      if (is_remove) {
-	g_sequence_remove(iter);
-	iter = g_sequence_get_end_iter(deploy.sql_seq);
-	is_remove = FALSE;
-      }
-      
     }
   }
   
@@ -503,6 +521,9 @@ static inline void cut_deploy_sql()
   while(!g_sequence_iter_is_end(iter)) {
     struct sqlcmd *cmd = g_sequence_get(iter);
 
+    g_message("DEPLOY: %s, is_disabled: %d; SQL:\n%s\n", cmd->path,
+	      cmd->is_disabled + cmd->is_identity , cmd->sql);
+    
     if (cmd->act == CREP && cmd->mstype == D_U) {
 
       if (g_str_has_suffix(cmd->sql, "("))
