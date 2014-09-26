@@ -63,7 +63,7 @@
 %token<ival> FOREIGN_KEY PRIMARY_KEY
 
 %type<nodeobj> index_def obj_name data_type clust_idx_def
-%type<ival> mk_def check_def
+%type<ival> mk_def check_def identity_def column_def_opt_list
 %type<sval> var_def
 
 %start input
@@ -251,7 +251,7 @@ scalar_exp_commalist: scalar_exp
 
 column_def: COLUMN data_type column_def_opt_list
 {
-	put_column($2.schema, $2.objname,
+	put_column($2.schema, $2.objname, $3,
 		   @2.first_column, @2.first_line,
 		   @2.last_column, @2.last_line);
 		 
@@ -302,23 +302,24 @@ var_def: NAME
 ;
 
 column_def_opt_list: %empty
+{
+	$$ = 0;
+}
 	| column_def_opt_list FILESTREAM
-{
-}
 	| column_def_opt_list NOT NULLX
-{
-}
 	| column_def_opt_list NULLX
-{
-}
 	| column_def_opt_list identity_def
 {
+	$$ = $2;
 }
 	| column_def_opt_list ROWGUIDCOL
 	| column_def_opt_list SPARSE
 ;
 
 identity_def: IDENTITY
+{
+	$$ = $1;
+}
 	| identity_def '(' INTNUM ',' INTNUM ')'
 	| identity_def NOT_FOR_REPLICATION
 ;

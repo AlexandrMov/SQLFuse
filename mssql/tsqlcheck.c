@@ -73,9 +73,11 @@ void put_node(unsigned int type, char *schema, char *objname, TOKEN_POS())
   reset_column();
 }
 
-void put_column(char *schema, char *objname, TOKEN_POS())
+void put_column(char *schema, char *objname, unsigned int is_identity, TOKEN_POS())
 {
   put_node(COLUMN, schema, objname, TOKEN_POS_A());
+  checker->node->column_node = g_try_new0(column_node_t, 1);
+  checker->node->column_node->is_identity = is_identity;
 }
 
 void put_module(unsigned int make_type, TOKEN_POS(m),
@@ -120,7 +122,7 @@ void end_checker()
       g_free(checker->node->objname);
     }
     
-    if (checker->node->type != CHECK
+    if (checker->node->type != CHECK && checker->node->type != COLUMN
 	&& checker->node->module_node != NULL) {
       g_free(checker->node->module_node);
       checker->node->module_node = NULL;
@@ -130,6 +132,12 @@ void end_checker()
 	&& checker->node->check_node != NULL) {
       g_free(checker->node->check_node);
       checker->node->check_node = NULL;
+    }
+
+    if (checker->node->type == COLUMN
+	&& checker->node->column_node != NULL) {
+      g_free(checker->node->column_node);
+      checker->node->column_node = NULL;
     }
     
     g_free(checker->node);

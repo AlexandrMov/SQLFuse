@@ -38,6 +38,12 @@ typedef struct check_node {
   
 } check_node_t;
 
+
+typedef struct column_node {
+  unsigned int is_identity;
+  
+} column_node_t;
+
 /*
  * Лист синтаксического дерева
  */
@@ -50,6 +56,7 @@ typedef struct objnode {
   union {
     mod_node_t *module_node;
     check_node_t *check_node;
+    column_node_t *column_node;
   };
   
   TOKEN_POS_T();
@@ -57,30 +64,28 @@ typedef struct objnode {
 
 
 /*
- *
  * Инициализация парсера, вызывается однажды
- *
  */
 void init_checker();
 
 /*
- *
  * Подготовка парсера к работе. После окончания парсинга,
  * должна вызываться end_checker()
- *
  */
 void start_checker();
 
+
 /*
- *
  * Вызывается из парсера, - вставляет найденный
  * токен в синтаксическое дерево
- *
  */
 void put_node(unsigned int type, char *schema, char *objname, TOKEN_POS());
 
 
-void put_column(char *schema, char *objname, TOKEN_POS());
+/*
+ * Добавить колонку в синтаксическое дерево
+ */
+void put_column(char *schema, char *objname, unsigned int is_identity, TOKEN_POS());
 
 
 void put_module(unsigned int make_type, TOKEN_POS(m),
@@ -93,25 +98,23 @@ void put_default(char *schema, char *objname, TOKEN_POS());
 
 void put_check(unsigned int check, unsigned int check_type, TOKEN_POS());
 
+
 /*
- *
  * Вернёт синтаксическое дерево
- *
  */
 objnode_t * get_node();
 
+
 /*
- *
  * Завершение парсинга
- *
  */
 void end_checker();
 
+
 /*
- *
  * Освобожение ресурсов, занимаемых парсером. Вызывается однажды.
- *
  */
 void close_checker();
+
 
 #endif

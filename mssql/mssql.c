@@ -352,13 +352,23 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
 			       *schema, *(schema + 1));
 
 	if (pcmd->act == CREP) {
-	  g_string_append(sql, " ALTER COLUMN ");
+	  if (cmd->is_identity) {
+	    g_string_append_printf(sql, " DROP COLUMN [%s]\nALTER TABLE [%s].[%s]",
+				   *(schema + 2), *schema, *(schema + 1));
+	    g_string_append_printf(sql, " ADD");
+	  }
+	  else {
+	    g_string_append_printf(sql, " ALTER COLUMN");
+	  }
 	}
 	else {
 	  g_string_append(sql, " ADD ");
 	}
 	
 	g_string_append_printf(sql, "%s", cmd->sql);
+	
+	g_string_append(sql, "-- cmp");
+	
 	g_free(cmd->sql);
 	cmd->sql = g_strdup(sql->str);
 	
@@ -438,10 +448,20 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
       g_string_append_printf(sql, "ALTER TABLE [%s].[%s]",
 			     *schema, *(schema + 1));
 
-      if (get_mask_id(cmd->path))
-	g_string_append_printf(sql, " ALTER COLUMN %s", cmd->sql);
+      if (get_mask_id(cmd->path)) {
+	if (cmd->is_identity) {
+	  g_string_append_printf(sql, " DROP COLUMN [%s]\nALTER TABLE [%s].[%s]",
+				 *(schema + 2), *schema, *(schema + 1));
+	  g_string_append_printf(sql, " ADD %s", cmd->sql);
+	}
+	else {
+	  g_string_append_printf(sql, " ALTER COLUMN %s", cmd->sql);
+	}
+      }
       else
 	g_string_append_printf(sql, " ADD %s", cmd->sql);
+
+	g_string_append(sql, "-- stop");
 
       g_free(cmd->sql);
       cmd->sql = g_strdup(sql->str);
@@ -468,7 +488,7 @@ static struct sqlcmd * drop_object(const char *path, struct sqlcmd *cmd,
   cmd->obj = ms2sqlfs(obj);
   cmd->mstype = obj->type;
   
-  if (obj->type == R_COL)
+  if (obj->type == R_COL && obj->column)
     cmd->is_identity = obj->column->identity;
   
   cmd->act = DROP;
@@ -929,7 +949,7 @@ void write_object(const char *path, const char *buffer, GError **error)
       object->object_id = get_mask_id(path);
       char *sql = write_ms_object(*schema, pobj, buffer, object, &terr);
       if (terr == NULL && sql != NULL) {
-	
+
 	if (object->def != NULL)
 	  g_free(object->def);
 
