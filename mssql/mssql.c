@@ -222,11 +222,13 @@ static struct sqlfs_ms_obj * find_cache_obj(const char *pathname, GError **error
   }
   
   struct sqlfs_ms_obj *obj = g_hash_table_lookup(cache.app_table, pathname);
-  if (!obj && terr == NULL)
-    obj = g_hash_table_lookup(cache.db_table, pathname);
-  
-  if (!obj && terr == NULL) {
-    obj = do_find(pathname, &terr);
+  if (terr == NULL) {
+    if (!obj)
+      obj = g_hash_table_lookup(cache.db_table, pathname);
+    
+    if (!obj) {
+      obj = do_find(pathname, &terr);
+    }
   }
 
   if (terr != NULL)
@@ -352,13 +354,22 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
 			       *schema, *(schema + 1));
 
 	if (pcmd->act == CREP) {
-	  g_string_append(sql, " ALTER COLUMN ");
+	  
+	  // не допускать редактирование колонок IDENTITY
+	  if (cmd->is_identity) {
+	    cmd->is_disabled = TRUE;
+	  }
+	  else {
+	    g_string_append_printf(sql, " ALTER COLUMN ");
+	  }
+	  
 	}
 	else {
 	  g_string_append(sql, " ADD ");
 	}
 	
 	g_string_append_printf(sql, "%s", cmd->sql);
+	
 	g_free(cmd->sql);
 	cmd->sql = g_strdup(sql->str);
 	
@@ -376,23 +387,16 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
 	obj->object_id = 0;
       }
 
-      // колонки IDENTITY всегда пересоздаются
-      if (pcmd->is_identity && pcmd->act == DROP && pcmd->mstype != R_TEMP) {
-	cmd->is_identity = TRUE;
-	
-	if (!obj->column)
-	  obj->column = g_try_new0(struct sqlfs_ms_column, 1);
-	
-	obj->column->identity = TRUE;
-	
-	break;
-      }
-      
       // объект удалён, имеет один тип с новым или новый временный, -
       // информация об удалении не нужна, использовать ALTER
       if ((pcmd->mstype == obj->type || obj->type == R_TEMP)
-	  && pcmd->act == DROP && !pcmd->is_identity) {
+	  && pcmd->act == DROP) {
 	obj->object_id = pcmd->obj->object_id;
+
+	// не допускать пересоздание колонок IDENTITY
+	if (pcmd->is_identity)
+	    cmd->is_disabled = TRUE;
+	
 	g_sequence_remove(iter);
 
 	// не пересоздавать схемы/таблицы
@@ -438,8 +442,17 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
       g_string_append_printf(sql, "ALTER TABLE [%s].[%s]",
 			     *schema, *(schema + 1));
 
-      if (get_mask_id(cmd->path))
-	g_string_append_printf(sql, " ALTER COLUMN %s", cmd->sql);
+      if (get_mask_id(cmd->path)) {
+	
+	// не допускать редактирование колонок IDENTITY
+	if (cmd->is_identity) {
+	  cmd->is_disabled = TRUE;
+	}
+	else {
+	  g_string_append_printf(sql, " ALTER COLUMN %s", cmd->sql);
+	}
+	
+      }
       else
 	g_string_append_printf(sql, " ADD %s", cmd->sql);
 
@@ -468,7 +481,7 @@ static struct sqlcmd * drop_object(const char *path, struct sqlcmd *cmd,
   cmd->obj = ms2sqlfs(obj);
   cmd->mstype = obj->type;
   
-  if (obj->type == R_COL)
+  if (obj->type == R_COL && obj->column)
     cmd->is_identity = obj->column->identity;
   
   cmd->act = DROP;
@@ -522,7 +535,7 @@ static inline void cut_deploy_sql()
     struct sqlcmd *cmd = g_sequence_get(iter);
 
     g_message("DEPLOY: %s, is_disabled: %d; SQL:\n%s\n", cmd->path,
-	      cmd->is_disabled + cmd->is_identity , cmd->sql);
+	      cmd->is_disabled , cmd->sql);
     
     if (cmd->act == CREP && cmd->mstype == D_U) {
 
@@ -929,7 +942,7 @@ void write_object(const char *path, const char *buffer, GError **error)
       object->object_id = get_mask_id(path);
       char *sql = write_ms_object(*schema, pobj, buffer, object, &terr);
       if (terr == NULL && sql != NULL) {
-	
+
 	if (object->def != NULL)
 	  g_free(object->def);
 
@@ -1108,11 +1121,11 @@ void rename_object(const char *oldname, const char *newname, GError **error)
       is_exists = g_hash_table_steal(cache.app_table, newname);
     
     if (obj_new == NULL) {
-      struct sqlcmd *mask = g_hash_table_lookup(cache.mask_table, newname);
-      if (mask != NULL && mask->obj->object_id) {
+
+      if (get_mask_id(newname)) {
 	obj_new = do_find(newname, &terr);
       }
-
+      
       if (terr != NULL) {
 	g_clear_error(&terr);
 	obj_new = NULL;

@@ -151,6 +151,16 @@ char * write_ms_object(const char *schema, struct sqlfs_ms_obj *parent,
     switch (node->type) {
     case COLUMN:
       obj->type = R_COL;
+
+      if (!obj->column) {
+	obj->column = g_try_new0(struct sqlfs_ms_column, 1);
+      }
+
+      if (node->column_node && node->column_node->is_identity > 0)
+	obj->column->identity = 1;
+      else
+	obj->column->identity = 0;
+      
       wrktext = create_column_def(schema, parent->name, obj,
 				  text + node->first_column - 1);
       break;
