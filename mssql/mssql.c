@@ -1,3 +1,22 @@
+/*
+  Copyright (C) 2013, 2014 Movsunov A.N.
+
+  This file is part of SQLFuse
+
+  SQLFuse is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  SQLFuse is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 #include <sqlfuse.h>
 #include <conf/keyconf.h>
 #include "msctx.h"
@@ -33,9 +52,7 @@ struct sqlcmd {
 
   struct sqlfs_object *obj;
 
-  gboolean is_disabled;
-  gboolean is_identity;
-  
+  unsigned int flags;
   char *sql;
 };
 
@@ -62,6 +79,25 @@ struct sqlcmd {
 
 static struct sqlcache cache;
 static struct sqldeploy deploy;
+
+#define CMD_DISABLED 0x0
+#define CMD_IDENTITY 0x1
+#define CMD_EXECUTED 0x2
+
+static inline void set_flag(struct sqlcmd *cmd, unsigned int flag)
+{
+  cmd->flags |= 1 << flag;
+}
+
+static inline void clear_flag(struct sqlcmd *cmd, unsigned int flag)
+{
+  cmd->flags &= ~(1 << flag);
+}
+
+static inline gboolean is_flag(struct sqlcmd *cmd, unsigned int flag)
+{
+  return (cmd->flags & (1 << flag));
+}
 
 static inline gboolean is_temp(struct sqlfs_ms_obj *obj)
 {
@@ -292,8 +328,7 @@ static inline struct sqlcmd * start_cache()
 {
   g_mutex_lock(&deploy.lock);
   struct sqlcmd *cmd = g_try_new0(struct sqlcmd, 1);
-  cmd->is_disabled = 0;
-  cmd->is_identity = 0;
+  cmd->flags = 0;
   
   return cmd;
 }
@@ -316,20 +351,40 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
   cmd->mstype = obj->type;
   
   if (obj->type == R_COL && obj->column)
-    cmd->is_identity = obj->column->identity;
-    
+    if (obj->column->identity)
+      set_flag(cmd, CMD_IDENTITY);
+    else
+      clear_flag(cmd, CMD_IDENTITY);
+
   cmd->act = CREP;
-  
+
   gboolean stop = TRUE;
   GString *sql = g_string_new(NULL);
+  gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
   GSequenceIter *iter = g_sequence_get_end_iter(deploy.sql_seq);
   while(!g_sequence_iter_is_begin(iter)) {
     iter = g_sequence_iter_prev(iter);
     struct sqlcmd *pcmd = g_sequence_get(iter);
 
+    // операция была выключена при рекурсивном удалении директории
+    if (IS_DIR(obj) && is_flag(pcmd, CMD_DISABLED)) {
+
+      gchar *dc = g_path_get_dirname(pcmd->path);
+
+      // включать операции только текущего каталога (не подкаталогов)
+      if (!g_strcmp0(cmd->path, dc)) {
+	clear_flag(pcmd, CMD_DISABLED);
+	stop = FALSE;
+      }
+      
+      g_free(dc);
+
+    }
+
     // включить колонку в таблицу
     if (pcmd->act == CREP && pcmd->mstype == D_U && cmd->mstype == R_COL
-	&& g_str_has_prefix(cmd->path, pcmd->path)) {
+	&& g_str_has_prefix(cmd->path, pcmd->path)
+	&& !is_flag(pcmd, CMD_EXECUTED)) {
       
       if (g_str_has_suffix(pcmd->sql, "("))
 	g_string_append_printf(sql, "%s\n\t%s", pcmd->sql, cmd->sql);
@@ -338,8 +393,8 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
       
       g_free(pcmd->sql);
       pcmd->sql = g_strdup(sql->str);
-
-      cmd->is_disabled = TRUE;
+	
+      set_flag(cmd, CMD_EXECUTED);
       break;
     }
 
@@ -347,17 +402,14 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
 
       // колонка уже включена в состав таблицы, либо редактировалась ранее
       if (pcmd->mstype == R_COL && pcmd->act != DROP) {
-	gchar **schema = g_strsplit(g_path_skip_root(cmd->path),
-				    G_DIR_SEPARATOR_S, -1);
-	
 	g_string_append_printf(sql, "ALTER TABLE [%s].[%s]",
 			       *schema, *(schema + 1));
 
 	if (pcmd->act == CREP) {
 	  
 	  // не допускать редактирование колонок IDENTITY
-	  if (cmd->is_identity) {
-	    cmd->is_disabled = TRUE;
+	  if (is_flag(cmd, CMD_IDENTITY)) {
+	    set_flag(cmd, CMD_EXECUTED);
 	  }
 	  else {
 	    g_string_append_printf(sql, " ALTER COLUMN ");
@@ -372,10 +424,6 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
 	
 	g_free(cmd->sql);
 	cmd->sql = g_strdup(sql->str);
-	
-	if (g_strv_length(schema) > 0) {
-	  g_strfreev(schema);
-	}
 	
 	break;
       }
@@ -394,22 +442,25 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
 	obj->object_id = pcmd->obj->object_id;
 
 	// не допускать пересоздание колонок IDENTITY
-	if (pcmd->is_identity)
-	    cmd->is_disabled = TRUE;
+	if (is_flag(pcmd, CMD_IDENTITY))
+	  set_flag(cmd, CMD_EXECUTED);
 	
 	g_sequence_remove(iter);
+	iter = NULL;
 
 	// не пересоздавать схемы/таблицы
+	// повторить цикл для включения операций с флагом CMD_DISABLED
 	if (IS_DIR(obj)) {
 	  stop = FALSE;
-	  break;
+	  set_flag(cmd, CMD_EXECUTED);
 	}
+	
       }
 
       // информация об создании пустого объекта не нужна
       // если новый объект - колонка, возможно, создана с таблицей
-      if (cmd->mstype != R_TEMP && pcmd->mstype == R_TEMP
-	  && pcmd->act == CREP) {
+      if (iter != NULL && cmd->mstype != R_TEMP
+	  && pcmd->mstype == R_TEMP && pcmd->act == CREP) {
 	obj->object_id = pcmd->obj->object_id;
 
        	g_sequence_remove(iter);
@@ -434,19 +485,17 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
   if (stop) {
 
     // колонка добавляется/редактируется впервые
-    if (cmd->mstype == R_COL && !cmd->is_disabled
+    if (cmd->mstype == R_COL && !is_flag(cmd, CMD_EXECUTED)
 	&& !g_str_has_prefix(cmd->sql, "ALTER TABLE")) {
-      gchar **schema = g_strsplit(g_path_skip_root(cmd->path),
-				  G_DIR_SEPARATOR_S, -1);
-      
+     
       g_string_append_printf(sql, "ALTER TABLE [%s].[%s]",
 			     *schema, *(schema + 1));
 
       if (get_mask_id(cmd->path)) {
 	
 	// не допускать редактирование колонок IDENTITY
-	if (cmd->is_identity) {
-	  cmd->is_disabled = TRUE;
+	if (is_flag(cmd, CMD_IDENTITY)) {
+	  set_flag(cmd, CMD_EXECUTED);
 	}
 	else {
 	  g_string_append_printf(sql, " ALTER COLUMN %s", cmd->sql);
@@ -459,10 +508,6 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
       g_free(cmd->sql);
       cmd->sql = g_strdup(sql->str);
       
-      if (g_strv_length(schema) > 0) {
-	g_strfreev(schema);
-      }
-      
       g_string_truncate(sql, 0);
     }
     
@@ -471,6 +516,10 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
 
   do_mask(path, cmd);
 
+  if (g_strv_length(schema) > 0) {
+    g_strfreev(schema);
+  }
+    
   g_string_free(sql, TRUE);
 }
 
@@ -482,7 +531,10 @@ static struct sqlcmd * drop_object(const char *path, struct sqlcmd *cmd,
   cmd->mstype = obj->type;
   
   if (obj->type == R_COL && obj->column)
-    cmd->is_identity = obj->column->identity;
+    if (obj->column->identity)
+      set_flag(cmd, CMD_IDENTITY);
+    else
+      clear_flag(cmd, CMD_IDENTITY);
   
   cmd->act = DROP;
 
@@ -496,13 +548,13 @@ static struct sqlcmd * drop_object(const char *path, struct sqlcmd *cmd,
       // оставить операции над таблицами и модулями
       if (cmd->mstype == D_SCHEMA && pcmd->mstype != D_U
 	  && IS_SCHOBJ(obj) && g_str_has_prefix(pcmd->path, cmd->path)) {
-	pcmd->is_disabled = TRUE;
+	set_flag(pcmd, CMD_DISABLED);
       }
 
       // оставить только операции над ограничениями FK
       if (cmd->mstype == D_U && g_str_has_prefix(pcmd->path, cmd->path)
-	  && pcmd->mstype != R_F && !pcmd->is_identity) {
-	pcmd->is_disabled = TRUE;
+	  && pcmd->mstype != R_F) {
+	set_flag(pcmd, CMD_DISABLED);
       }
 
     }
@@ -534,8 +586,8 @@ static inline void cut_deploy_sql()
   while(!g_sequence_iter_is_end(iter)) {
     struct sqlcmd *cmd = g_sequence_get(iter);
 
-    g_message("DEPLOY: %s, is_disabled: %d; SQL:\n%s\n", cmd->path,
-	      cmd->is_disabled , cmd->sql);
+    g_message("DEPLOY: %s, flags: %d; SQL:\n%s\n", cmd->path,
+	      cmd->flags, cmd->sql);
     
     if (cmd->act == CREP && cmd->mstype == D_U) {
 
@@ -587,7 +639,8 @@ static inline void do_deploy_sql()
     // в том числе временные схемы и таблицы
     SAFE_REMOVE_ALL(cmd->path);
 
-    if (cmd->sql != NULL && terr == NULL && !cmd->is_disabled) {
+    if (cmd->sql != NULL && terr == NULL && !is_flag(cmd, CMD_DISABLED)
+	&& !is_flag(cmd, CMD_EXECUTED)) {
 
       exec_sql_cmd(cmd->sql, ctx, &terr);
       
@@ -1143,7 +1196,7 @@ void rename_object(const char *oldname, const char *newname, GError **error)
 	  && (obj_old->type != obj_new->type || !is_temp(obj_old))) {
 
 	struct sqlcmd *cmd = g_try_new0(struct sqlcmd, 1);
-	cmd->is_disabled = 0;
+	cmd->flags = 0;
 	
 	char *sql = remove_ms_object(*schemanew, *(schemanew + 1), obj_new, &terr);
 	if (terr == NULL && sql != NULL) {
@@ -1181,7 +1234,7 @@ void rename_object(const char *oldname, const char *newname, GError **error)
       }
 
       struct sqlcmd *cmd = g_try_new0(struct sqlcmd, 1);
-      cmd->is_disabled = 0;
+      cmd->flags = 0;
       
       char *sql = rename_ms_object(*schemaold, *schemanew, obj_old, obj_new,
 				   ppobj_old, &terr);
