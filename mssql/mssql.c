@@ -76,6 +76,9 @@ struct sqlcmd {
 #define IS_SCHOBJ(object) (object->type >= R_FN && object->type <= R_P	\
 			   || object->type == R_FT || object->type == R_TF \
 			   || object->type == R_IF)
+#define IS_TBLCMD(cmd) (cmd->mstype == R_C || cmd->mstype == R_D	\
+			|| cmd->mstype == R_PK || cmd->mstype == R_UQ	\
+			|| cmd->mstype == R_X || cmd->mstype == R_F)
 
 static struct sqlcache cache;
 static struct sqldeploy deploy;
@@ -344,6 +347,63 @@ static inline void end_cache() {
   g_mutex_unlock(&deploy.lock);
 }
 
+static void insert2cache_sorted(struct sqlcmd *cmd)
+{
+  if (cmd->mstype == R_COL || IS_TBLCMD(cmd)) {
+
+    gchar *cc = g_path_get_dirname(cmd->path);
+    GSequenceIter *mark = NULL;
+    GSequenceIter *iter = g_sequence_get_end_iter(deploy.sql_seq);
+    while(!g_sequence_iter_is_begin(iter)) {
+      iter = g_sequence_iter_prev(iter);
+      struct sqlcmd *pcmd = g_sequence_get(iter);
+      gchar *pc = g_path_get_dirname(pcmd->path);
+
+      // смотреть дальше создания таблицы нет смысла
+      if ((pcmd->mstype == D_U && pcmd->act == CREP || pcmd->act == RENAME)
+	  && !g_strcmp0(pc, cmd->path)) {
+	g_free(pc);
+	break;
+      }
+    
+      // только в одном каталоге
+      if (!g_strcmp0(pc, cc)) {
+	
+	if (IS_TBLCMD(pcmd) && cmd->mstype == R_COL && cmd->act == CREP) {
+	  mark = iter;
+	}
+
+	if (IS_TBLCMD(cmd) && pcmd->mstype == R_COL && cmd->act == DROP) {
+	  mark = iter;
+	}
+
+	// не смотреть дальше других операций
+	if (mark != NULL && pcmd->act != cmd->act) {
+	  g_free(pc);
+	  break;
+	}
+      }
+      else
+	// другая последовательность
+	if (mark != NULL) {
+	  g_free(pc);
+	  break;
+	}
+      
+      g_free(pc);
+    }
+
+    if (mark == NULL)
+      g_sequence_append(deploy.sql_seq, cmd);
+    else
+      g_sequence_insert_before(mark, cmd);
+    
+    g_free(cc);
+  }
+  else
+    g_sequence_append(deploy.sql_seq, cmd);
+}
+
 static void crep_object(const char *path, struct sqlcmd *cmd,
 			struct sqlfs_ms_obj *obj)
 {
@@ -510,8 +570,8 @@ static void crep_object(const char *path, struct sqlcmd *cmd,
       
       g_string_truncate(sql, 0);
     }
-    
-    g_sequence_append(deploy.sql_seq, cmd);
+
+    insert2cache_sorted(cmd);
   }
 
   do_mask(path, cmd);
@@ -561,7 +621,7 @@ static struct sqlcmd * drop_object(const char *path, struct sqlcmd *cmd,
   }
   
   do_mask(path, cmd);
-  g_sequence_append(deploy.sql_seq, cmd);
+  insert2cache_sorted(cmd);
 }
 
 static struct sqlcmd * rename_obj(const char *oldname, const char *newname,
