@@ -646,8 +646,10 @@ static inline void cut_deploy_sql()
   while(!g_sequence_iter_is_end(iter)) {
     struct sqlcmd *cmd = g_sequence_get(iter);
 
+#ifdef SQLDEBUG
     g_message("DEPLOY: %s, flags: %d; SQL:\n%s\n", cmd->path,
 	      cmd->flags, cmd->sql);
+#endif
     
     if (cmd->act == CREP && cmd->mstype == D_U) {
 
