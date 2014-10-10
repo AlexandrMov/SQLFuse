@@ -38,48 +38,46 @@ struct tsql_checker {
   GMutex lock;
 };
 
-struct tsql_checker *checker;
+static struct tsql_checker *checker;
 
 void init_checker()
 {
   if (!checker) {
     checker = g_try_new0(struct tsql_checker, 1);
     g_mutex_init(&checker->lock);
+    checker->node = NULL;
   }
 }
 
 void start_checker()
 {
-  if (!checker->node)
-    checker->node = g_try_new0(objnode_t, 1);
-  
   g_mutex_lock(&checker->lock);
 }
 
 void put_node(unsigned int type, char *schema, char *objname, TOKEN_POS())
 {
-  if (checker->node == NULL) {
-    checker->node = g_try_new0(objnode_t, 1);
+  checker->node = g_try_new0(objnode_t, 1);
+
+  TOKEN_POS_ASSIGN(checker->node);
+    
+  if (schema != NULL) {
+    checker->node->schema = g_strdup(schema);
   }
 
-  if (checker->node != NULL) {
-    TOKEN_POS_ASSIGN(checker->node);
-    
-    if (schema != NULL)
-      checker->node->schema = g_strdup(schema);
-
-    if (objname != NULL)
-      checker->node->objname = g_strdup(objname);
-    
-    checker->node->type = type;
+  if (objname != NULL) {
+    checker->node->objname = g_strdup(objname);
   }
-
+  
+  checker->node->type = type;
+  
   reset_column();
 }
 
-void put_column(char *schema, char *objname, TOKEN_POS())
+void put_column(char *schema, char *objname, unsigned int is_identity, TOKEN_POS())
 {
   put_node(COLUMN, schema, objname, TOKEN_POS_A());
+  checker->node->column_node = g_try_new0(column_node_t, 1);
+  checker->node->column_node->is_identity = is_identity;
 }
 
 void put_module(unsigned int make_type, TOKEN_POS(m),
@@ -87,7 +85,7 @@ void put_module(unsigned int make_type, TOKEN_POS(m),
 		TOKEN_POS(t))
 {
   put_node(module_type, schema, objname, TOKEN_POS_A(t));
-  
+
   checker->node->module_node = g_try_new0(mod_node_t , 1);
   checker->node->module_node->make_type = make_type;
 
@@ -115,21 +113,36 @@ objnode_t * get_node() {
 
 void end_checker()
 {
-  /*if (checker->node != NULL) {
-    if (checker->node->schema != NULL)
+  if (checker->node != NULL) {
+    if (checker->node->schema != NULL) {
       g_free(checker->node->schema);
-
-    if (checker->node->objname != NULL)
+    }
+    
+    if (checker->node->objname != NULL) {
       g_free(checker->node->objname);
-
-    if (checker->node->module_node != NULL)
+    }
+    
+    if (checker->node->type != CHECK && checker->node->type != COLUMN
+	&& checker->node->module_node != NULL) {
       g_free(checker->node->module_node);
-
-    if (checker->node->check_node != NULL)
+      checker->node->module_node = NULL;
+    }
+    
+    if (checker->node->type == CHECK
+	&& checker->node->check_node != NULL) {
       g_free(checker->node->check_node);
+      checker->node->check_node = NULL;
+    }
+
+    if (checker->node->type == COLUMN
+	&& checker->node->column_node != NULL) {
+      g_free(checker->node->column_node);
+      checker->node->column_node = NULL;
+    }
     
     g_free(checker->node);
-    }*/
+    checker->node = NULL;
+  }
 
   g_mutex_unlock(&checker->lock);
 }

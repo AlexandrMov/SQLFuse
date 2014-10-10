@@ -56,7 +56,6 @@ ALTER		{ return ALTER; }
 PROC|PROCEDURE	{ return PROC; }
 TRIGGER		{ return TRIGGER; }
 VIEW		{ return VIEW; }
-SCHEMA		{ return SCHEMA; }
 TYPE		{ return TYPE; }
 INDEX		{ return INDEX; }
 UNIQUE		{ return UNIQUE; }

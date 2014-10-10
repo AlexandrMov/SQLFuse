@@ -55,7 +55,7 @@
 %left '*' '/'
 
 %token<ival> CREATE ALTER INDEX UNIQUE FUNCTION CONSTRAINT
-%token<ival> CLUSTERED NONCLUSTERED TYPE VIEW SCHEMA TRIGGER
+%token<ival> CLUSTERED NONCLUSTERED TYPE VIEW TRIGGER
 %token<ival> FILESTREAM COLLATE NULLX ROWGUIDCOL SPARSE
 %token<ival> IDENTITY MAX FOR WITH_CHECK
 %token<ival> ONX NOT_FOR_REPLICATION COLUMN NOT WITH_NOCHECK
@@ -63,7 +63,7 @@
 %token<ival> FOREIGN_KEY PRIMARY_KEY
 
 %type<nodeobj> index_def obj_name data_type clust_idx_def
-%type<ival> mk_def check_def
+%type<ival> mk_def check_def identity_def column_def_opt_list
 %type<sval> var_def
 
 %start input
@@ -81,7 +81,6 @@ input: column_def
 }
 	| trg_def
 	| view_def
-	| schema_def
 	| type_def
 	| constraint_def default_def
 	| with_check_def
@@ -89,7 +88,7 @@ input: column_def
 	| constraint_def unique_def
 ;
 
-constraint_def: CONSTRAINT var_def
+constraint_def: CONSTRAINT
 ;
 
 primary_def: PRIMARY_KEY 
@@ -149,15 +148,6 @@ view_def: mk_def VIEW obj_name
 		   VIEW, $3.schema, $3.objname,
 		   @3.first_column, @3.first_line,
 	      	   @3.last_column, @3.last_line);
-	YYACCEPT;
-}
-;
-
-schema_def: mk_def SCHEMA var_def
-{
-	put_node(SCHEMA, NULL, $3,
-		 @3.first_column, @3.first_line,
-	      	 @3.last_column, @3.last_line);
 	YYACCEPT;
 }
 ;
@@ -259,11 +249,11 @@ scalar_exp_commalist: scalar_exp
 		| scalar_exp_commalist ',' scalar_exp
 ;
 
-column_def: COLUMN obj_name data_type column_def_opt_list
+column_def: COLUMN data_type column_def_opt_list
 {
-	put_column($3.schema, $3.objname,
-		   @3.first_column, @3.first_line,
-		   @3.last_column, @3.last_line);
+	put_column($2.schema, $2.objname, $3,
+		   @2.first_column, @2.first_line,
+		   @2.last_column, @2.last_line);
 		 
 	YYACCEPT;
 }
@@ -312,23 +302,24 @@ var_def: NAME
 ;
 
 column_def_opt_list: %empty
+{
+	$$ = 0;
+}
 	| column_def_opt_list FILESTREAM
-{
-}
 	| column_def_opt_list NOT NULLX
-{
-}
 	| column_def_opt_list NULLX
-{
-}
 	| column_def_opt_list identity_def
 {
+	$$ = $2;
 }
 	| column_def_opt_list ROWGUIDCOL
 	| column_def_opt_list SPARSE
 ;
 
 identity_def: IDENTITY
+{
+	$$ = $1;
+}
 	| identity_def '(' INTNUM ',' INTNUM ')'
 	| identity_def NOT_FOR_REPLICATION
 ;

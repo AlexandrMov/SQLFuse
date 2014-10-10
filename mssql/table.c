@@ -17,7 +17,7 @@
   along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "mssqlfs.h"
+#include "msctx.h"
 #include "table.h"
 #include "exec.h"
 #include "util.h"
@@ -46,13 +46,6 @@ char * create_column_def(const char *schema, const char *table,
 {
   char *result = NULL;
   GString *sql = g_string_new(NULL);
-  g_string_append_printf(sql, "ALTER TABLE %s.%s", schema, table);
-  if (obj->object_id) {
-    g_string_append(sql, " ALTER COLUMN ");
-  }
-  else {
-    g_string_append(sql, " ADD ");
-  }
   g_string_append_printf(sql, "[%s] %s", obj->name, def);
 
   result = g_strdup(sql->str);
@@ -76,7 +69,7 @@ char * create_constr_def(const char *schema, const char *table,
       g_string_append(sql, " WITH CHECK ");
   }
 
-  g_string_append_printf(sql, "ADD CONSTRAINT [%s] ", obj->name);
+  g_string_append_printf(sql, " ADD CONSTRAINT [%s] ", obj->name);
 
   if (obj->type == R_C) {
     g_string_append_printf(sql, "CHECK", def);
@@ -104,7 +97,7 @@ char * make_column_def(struct sqlfs_ms_obj *obj)
   char *text = NULL;
   struct sqlfs_ms_column *col = obj->column;
   GString *def = g_string_new(NULL);
-  g_string_append_printf(def, "COLUMN [%s] %s", obj->name, col->type_name);
+  g_string_append_printf(def, "COLUMN %s", col->type_name);
   
   if (!g_strcmp0(col->type_name, "float"))
     g_string_append_printf(def, "(%d)", col->precision);
@@ -117,12 +110,17 @@ char * make_column_def(struct sqlfs_ms_obj *obj)
       || g_str_has_suffix(col->type_name, "binary")) {
     if (col->max_len < 0)
       g_string_append(def, "(MAX)");
-    else
-      g_string_append_printf(def, "(%d)", col->max_len);
+    else {
+      if (!g_strcmp0(col->type_name, "nvarchar")
+	  || !g_strcmp0(col->type_name, "nchar"))
+	g_string_append_printf(def, "(%d)", col->max_len / 2);
+      else
+	g_string_append_printf(def, "(%d)", col->max_len);
+    }
   }
 
   if (col->identity) {
-    g_string_append_printf(def, " IDENTITY ('%s', '%s')",
+    g_string_append_printf(def, " IDENTITY (%s, %s)",
 			   col->seed_val, col->inc_val);
     
     if (col->not4repl)
@@ -131,6 +129,8 @@ char * make_column_def(struct sqlfs_ms_obj *obj)
   
   if (!col->nullable)
     g_string_append(def, " NOT NULL");
+  else
+    g_string_append(def, " NULL");
   
   text = g_strconcat(def->str, "\n", NULL);
   g_string_free(def, TRUE);
@@ -195,7 +195,7 @@ GList * fetch_columns(int tid, const char *name, GError **error)
 	struct sqlfs_ms_obj *obj = g_try_new0(struct sqlfs_ms_obj, 1);
 	
 	obj->object_id = col_id_buf;
-	obj->name = g_strdup(trimwhitespace(colname_buf));
+	obj->name = g_strdup(g_strchomp(colname_buf));
 	obj->type = R_COL;
 	obj->parent_id = tid;
 	
@@ -208,10 +208,10 @@ GList * fetch_columns(int tid, const char *name, GError **error)
 	obj->column->precision = precision;
 	obj->column->nullable = nullable;
 	obj->column->ansi = ansi;
-	obj->column->type_name = g_strdup(trimwhitespace(typename_buf));
+	obj->column->type_name = g_strdup(g_strchomp(typename_buf));
 	if (identity == TRUE) {
-	  obj->column->seed_val = g_strdup(trimwhitespace(seed_val));
-	  obj->column->inc_val = g_strdup(trimwhitespace(inc_val));
+	  obj->column->seed_val = g_strdup(g_strchomp(seed_val));
+	  obj->column->inc_val = g_strdup(g_strchomp(inc_val));
 	  obj->column->not4repl = not4repl;
 	}
 	obj->def = make_column_def(obj);
@@ -285,17 +285,16 @@ GList * fetch_modules(int tid, const char *name, GError **error)
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
-	trgname_buf = trimwhitespace(trgname_buf);
+	trgname_buf = g_strchomp(trgname_buf);
 	trgobj = g_try_new0(struct sqlfs_ms_obj, 1);
 	trgobj->object_id = trg_id_buf;
 	trgobj->name = g_strdup(trgname_buf);
-	trgobj->type = str2mstype(trimwhitespace(type_buf));
+	trgobj->type = str2mstype(g_strchomp(type_buf));
 	trgobj->parent_id = tid;
 	trgobj->ctime = cdate_buf;
 	trgobj->mtime = mdate_buf;
 	trgobj->len = def_len_buf;
-            
-	trgobj->cached_time = g_get_monotonic_time();
+        
 	list = g_list_append(list, trgobj);
 	break;
       case BUF_FULL:
@@ -330,7 +329,7 @@ char * make_constraint_def(struct sqlfs_ms_obj *ctrt, const char *def)
   GString *sql = g_string_new(NULL);
   
   if (ctrt->type == R_D) {
-    g_string_append_printf(sql, "CONSTRAINT %s ", ctrt->name);
+    g_string_append(sql, "CONSTRAINT ");
     g_string_append_printf(sql, "DEFAULT %s FOR [%s]", def, ctrt->clmn_ctrt->column_name);
   }
   else
@@ -340,7 +339,7 @@ char * make_constraint_def(struct sqlfs_ms_obj *ctrt, const char *def)
       else
 	g_string_append(sql, "WITH CHECK ");
       
-      g_string_append_printf(sql, "CONSTRAINT %s CHECK ", ctrt->name);
+      g_string_append(sql, "CONSTRAINT CHECK ");
       
       if (ctrt->clmn_ctrt->not4repl == TRUE)
 	g_string_append(sql, "NOT FOR REPLICATION ");
@@ -419,24 +418,23 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
 	obj = g_try_new0(struct sqlfs_ms_obj, 1);
 	obj->object_id = obj_id;
 	obj->parent_id = tid;
-	obj->name = g_strdup(trimwhitespace(csnt_name));
+	obj->name = g_strdup(g_strchomp(csnt_name));
 	obj->mtime = mdate_buf;
 	obj->ctime = cdate_buf;
-	obj->type = str2mstype(trimwhitespace(type_buf));
+	obj->type = str2mstype(g_strchomp(type_buf));
 
 	obj->clmn_ctrt =  g_try_new0(struct sqlfs_ms_constraint, 1);
 
 	if (obj->type == R_D)
-	  obj->clmn_ctrt->column_name = g_strdup(trimwhitespace(clmn_name));
+	  obj->clmn_ctrt->column_name = g_strdup(g_strchomp(clmn_name));
 	else {
 	  obj->clmn_ctrt->disabled = disabled;
 	  obj->clmn_ctrt->not4repl = not4repl;
 	}
 	
-	obj->def = make_constraint_def(obj, trimwhitespace(def_text));
+	obj->def = make_constraint_def(obj, g_strchomp(def_text));
 	obj->len = strlen(obj->def);
 
-	obj->cached_time = g_get_monotonic_time();
 	reslist = g_list_append(reslist, obj);
 	break;
       case BUF_FULL:
@@ -524,7 +522,7 @@ char * make_foreign_def(struct sqlfs_ms_obj *obj)
   else
     g_string_append(sql, "WITH CHECK ");
   
-  g_string_append_printf(sql, "CONSTRAINT [%s] FOREIGN KEY ", obj->name);
+  g_string_append(sql, "CONSTRAINT FOREIGN KEY ");
   g_string_append_printf(sql, "(%s) ", fk->columns_def);
   g_string_append_printf(sql, "REFERENCES %s (%s)", fk->ref_object_def,
 			 fk->ref_columns_def);
@@ -646,7 +644,6 @@ GList * fetch_foreignes(int tid, const char *name, GError **error)
 	obj->def = make_foreign_def(obj);
 	obj->len = strlen(obj->def);
 
-	obj->cached_time = g_get_monotonic_time();
 	reslist = g_list_append(reslist, obj);
       }
 	break;
@@ -725,7 +722,7 @@ char * make_index_def(const char *schema, const char *table,
   GString *sql = g_string_new(NULL);
 
   if (obj->type == R_PK || obj->type == R_UQ) {
-    g_string_append_printf(sql, "CONSTRAINT %s ", obj->name);
+    g_string_append(sql, "CONSTRAINT ");
 
     if (obj->type == R_PK)
       g_string_append(sql, "PRIMARY KEY CLUSTERED ");
@@ -738,7 +735,7 @@ char * make_index_def(const char *schema, const char *table,
     if (idx->is_unique)
       g_string_append(sql, "UNIQUE ");
     
-    g_string_append_printf(sql, "NONCLUSTERED INDEX [%s] ", obj->name);
+    g_string_append(sql, "NONCLUSTERED INDEX ");
     g_string_append_printf(sql, "ON [%s].[%s] ", schema, table);
   }
 
@@ -933,7 +930,6 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
 	obj->def = make_index_def(g_strchomp(schema_name),
 				  g_strchomp(table_name), obj);
 	obj->len = strlen(obj->def);
-	obj->cached_time = g_get_monotonic_time();
 	reslist = g_list_append(reslist, obj);
 	break;
       case BUF_FULL:
