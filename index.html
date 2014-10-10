@@ -54,6 +54,14 @@ make
 <p>Установка в систему пока не предусмотрена.</p>
 </blockquote>
 
+<p>Вы также можете собрать SQLFuse с опцией <code>DEBUG</code>:</p>
+
+<div class="highlight highlight-bash"><pre>make clean
+make debug
+</pre></div>
+
+<p>Это позволит увидеть исполняемые команды при сбросе кэша в БД.</p>
+
 <h2>
 <a name="%D0%97%D0%B0%D0%BF%D1%83%D1%81%D0%BA-%D0%B8-%D0%BD%D0%B0%D1%81%D1%82%D1%80%D0%BE%D0%B9%D0%BA%D0%B0" class="anchor" href="#%D0%97%D0%B0%D0%BF%D1%83%D1%81%D0%BA-%D0%B8-%D0%BD%D0%B0%D1%81%D1%82%D1%80%D0%BE%D0%B9%D0%BA%D0%B0"><span class="octicon octicon-link"></span></a>Запуск и настройка</h2>
 
@@ -62,7 +70,9 @@ make
 <ul>
 <li>
 <code>profilename</code>  - наименование профиля, которое определено в конфигурационном файле <code>sqlfuse.conf</code>, который находится в каталоге <code>conf/</code> в корневой директории SQLFuse.</li>
-</ul><p>Пример монтирования БД AdventureWorks2008R2:</p>
+</ul>
+
+<p>Пример монтирования БД AdventureWorks2008R2:</p>
 
 <div class="highlight highlight-bash"><pre>./sqlfuse -o <span class="nv">profilename</span><span class="o">=</span>AdventureWorks2008R2 ~/myserver/advworks
 </pre></div>
@@ -76,7 +86,9 @@ make
 <ul>
 <li><a href="http://freedesktop.org/Standards/desktop-entry-spec">Desktop Entry Specification</a></li>
 <li><a href="http://freedesktop.org/Standards/icon-theme-spec">Icon Theme Specification</a></li>
-</ul><p>Файл же <code>sqlfuse.conf</code> должен включать одну или более групп, имеющие пары ключ-значение. Наименование группы задаёт имя профиля, которое будет искать SQLFuse при монтировании в параметре <code>profilename</code> опции <code>-o</code>. Существует и зарезервированное наименование группы - <code>[global]</code>. Пары ключ-значение группы <code>[global]</code> заменяют пары ключ-значение других пользовательские групп. Таким образом, Вы можете задавать сквозные параметры, которые применимы ко всем профилям.</p>
+</ul>
+
+<p>Файл же <code>sqlfuse.conf</code> должен включать одну или более групп, имеющие пары ключ-значение. Наименование группы задаёт имя профиля, которое будет искать SQLFuse при монтировании в параметре <code>profilename</code> опции <code>-o</code>. Существует и зарезервированное наименование группы - <code>[global]</code>. Пары ключ-значение группы <code>[global]</code> заменяют пары ключ-значение других пользовательские групп. Таким образом, Вы можете задавать сквозные параметры, которые применимы ко всем профилям.</p>
 
 <p>Далее представлен список возможных ключей:</p>
 
@@ -100,14 +112,14 @@ make
 <li>
 <code>password</code> - пароль пользователя БД;</li>
 <li>
-<code>default_column</code> - задаёт определение столбца по умолчанию; могут быть переданы шаблоны <code>%schema</code> и <code>%table</code>, заменяемые на наименования схемы и таблицы соответственно;</li>
-<li>
-<code>merge_names</code>  - если <code>%schema</code> и <code>%table</code> одинаковы, то заменить их, а также символы между ними на <code>%table</code>, принимает значение <code>true</code> или <code>false</code>;</li>
-<li>
 <code>exclude_schemas</code> - не отображать заданные схемы, разделённые <code>;</code>;</li>
 <li>
+<code>deploy_time</code> - задержка в секундах для сброса данных в БД, задержка считается от времени последней модификации объектов;</li>
+<li>
 <code>filter</code> - фильтр для объектов - регулярное выражение, - при совпадении пути объект не будет найден, <b>для фильтрации схем используйте</b> <code>exclude_schemas</code>.</li>
-</ul><blockquote>
+</ul>
+
+<blockquote>
 <p>При подключению к экземпляру сервера, например, <code>test\test</code>, экранировать символ <code>\</code> не нужно, - это делает за Вас SQLFuse, при чтении конфигурационных файлов.</p>
 </blockquote>
 
@@ -124,7 +136,9 @@ make
 <code>username</code> - логин пользователя БД;</li>
 <li>
 <code>password</code> - пароль пользователя БД.</li>
-</ul><blockquote>
+</ul>
+
+<blockquote>
 <p>Если Вам необходима авторизация в домене, то символ <code>\</code> экранировать нет необходимости.</p>
 </blockquote>
 
