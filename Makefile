@@ -16,7 +16,6 @@
 #  along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 
 PROGRAM 	:= sqlfuse
-DEBUG		:= debug
 CC		:= gcc
 YACC		:= bison -dvl
 LEX		:= flex -L
@@ -58,7 +57,6 @@ debug: $(PROGRAM)
 
 clean:
 	rm -f $(PROGRAM)
-	rm -f $(DEBUG)
 	rm -f $(OBJ_FILES)
 	rm -f $(addprefix $(MSSQL_PREFIX), $(MSSQL_GEN_FILES) *~)
 	rm -f $(addprefix $(KC_PREFIX), $(KC_OBJS) *~)

@@ -347,6 +347,23 @@ static inline void end_cache() {
   g_mutex_unlock(&deploy.lock);
 }
 
+static inline gboolean pause_timer()
+{
+  if (g_mutex_trylock(&deploy.lock)) {
+    g_timer_stop(deploy.timer);
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+static inline void continue_timer(gboolean locked) {
+  if (locked) {
+    g_timer_continue(deploy.timer);
+    g_mutex_unlock(&deploy.lock);
+  }
+}
+
 static void insert2cache_sorted(struct sqlcmd *cmd)
 {
   if (cmd->mstype == R_COL || IS_TBLCMD(cmd)) {
@@ -808,7 +825,7 @@ void init_cache(GError **error)
 struct sqlfs_object * find_object(const char *pathfile, GError **error)
 {
   // отключаем таймер деплоя на время выборки из БД
-  g_timer_stop(deploy.timer);
+  gboolean paused = pause_timer();
   
   GError *terr = NULL;
   struct sqlfs_object *result;
@@ -822,8 +839,8 @@ struct sqlfs_object * find_object(const char *pathfile, GError **error)
     result = ms2sqlfs(obj);
   }
 
-  g_timer_continue(deploy.timer);
-  
+  continue_timer(paused);
+
   if (terr != NULL)
     g_propagate_error(error, terr); 
   
@@ -839,7 +856,7 @@ GList * fetch_dir_objects(const char *pathdir, GError **error)
   int nschema = g_strcmp0(pathdir, G_DIR_SEPARATOR_S);
 
   // отключаем таймер деплоя на время выборки из БД
-  g_timer_stop(deploy.timer);
+  gboolean paused = pause_timer();
 
   // получить объекты в соответствии с уровнем
   if (!nschema) {
@@ -897,7 +914,7 @@ GList * fetch_dir_objects(const char *pathdir, GError **error)
 
   }
 
-  g_timer_continue(deploy.timer);
+  continue_timer(paused);
   
   if (terr != NULL)
     g_propagate_error(error, terr);
@@ -911,7 +928,7 @@ char * fetch_object_text(const char *path, GError **error)
   GError *terr = NULL;
   
   // отключаем таймер деплоя на время выборки из БД
-  g_timer_stop(deploy.timer);
+  gboolean paused = pause_timer();
   
   struct sqlfs_ms_obj *object = find_cache_obj(path, &terr);
 
@@ -935,7 +952,7 @@ char * fetch_object_text(const char *path, GError **error)
     g_strfreev(schema); 
   }
 
-  g_timer_continue(deploy.timer);
+  continue_timer(paused);
   
   if (terr != NULL)
     g_propagate_error(error, terr);

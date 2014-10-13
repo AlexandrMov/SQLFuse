@@ -480,6 +480,9 @@ int main (int argc, char **argv)
   if (fuse_opt_parse(&args, sqlprofile, sqlfs_opts, sqlfs_opt_proc) == -1)
     res = 1;
 
+  if (!res && !sqlprofile->profile)
+    res = 1;
+
   if (!res) {
     GError *terr = NULL;
     
@@ -515,9 +518,15 @@ int main (int argc, char **argv)
       g_free(sqlprofile);
     }
 
-
-    if (terr != NULL)
+    if (terr != NULL) {
+      g_error("Position %d - #%d: %s",
+		res, terr->code, terr->message);
       g_error_free(terr);
+    }
+  }
+  else {
+    g_error("Position %d - #%d: %s",
+	    res, 0, "Invalid arguments");
   }
 
   g_hash_table_destroy(cache.open_table);

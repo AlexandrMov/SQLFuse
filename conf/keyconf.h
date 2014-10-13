@@ -20,7 +20,7 @@
 #ifndef KEYFILE_H
 #define KEYFILE_H
 
-#include <glib.h>
+#include <sqlfuse.h>
 
 typedef struct {
   char *appname;

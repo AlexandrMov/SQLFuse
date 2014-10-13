@@ -90,12 +90,23 @@ void init_keyfile(const char *profile, GError **error)
   g_key_file_load_from_file(keyfile, keyctx->filename, G_KEY_FILE_NONE, &terr);
   
   keyctx->sqlctx = g_try_new0(sqlctx_t, 1);
-  if (terr == NULL && g_key_file_has_group(keyfile, "global")) {
-    load_from_file(keyfile, "global", &terr);
-  }
+  if (terr == NULL) {
+    
+    if (g_key_file_has_group(keyfile, "global")) {
+      load_from_file(keyfile, "global", &terr);
+    }
 
-  if (terr == NULL && g_key_file_has_group(keyfile, profile)) {
-    load_from_file(keyfile, profile, &terr);
+    if (terr == NULL) {
+      if (g_key_file_has_group(keyfile, profile)) {
+	load_from_file(keyfile, profile, &terr);
+      }
+      else {
+	g_set_error(&terr, EENOTFOUND, EENOTFOUND,
+		    "%s:%d: Profile not found in config",
+		    __FILE__, __LINE__);
+      }
+    }
+    
   }
   
   g_key_file_free(keyfile);
