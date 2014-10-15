@@ -699,6 +699,22 @@ static gboolean clear_tbl_files(gpointer key, gpointer value,
   return FALSE;
 }
 
+static gboolean clear_dir_files(gpointer key, gpointer value,
+				gpointer user_data)
+{
+  gboolean result = FALSE;
+  if (key != NULL) {
+    gchar *path = (gchar *) key, *pathdir = (gchar *) user_data;
+    gchar *dc = g_path_get_dirname(path);
+    if (!g_strcmp0(dc, pathdir)) {
+      result = TRUE;
+    }
+    g_free(dc);
+  }
+
+  return result;
+}
+
 static inline void do_deploy_sql()
 {
   GSequenceIter *iter = g_sequence_get_begin_iter(deploy.sql_seq);
@@ -857,6 +873,11 @@ GList * fetch_dir_objects(const char *pathdir, GError **error)
 
   // отключаем таймер деплоя на время выборки из БД
   gboolean paused = pause_timer();
+
+  // очистить устаревшие данные из DB-кэша
+  gchar *p = g_strdup(pathdir);
+  g_hash_table_foreach_remove(cache.db_table, &clear_dir_files, p);
+  g_free(p);
 
   // получить объекты в соответствии с уровнем
   if (!nschema) {

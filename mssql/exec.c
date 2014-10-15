@@ -131,23 +131,8 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
 	DBSETLPWD(msctx->login, sqlctx->password);
 	DBSETLAPP(msctx->login, sqlctx->appname);
 
-	if ((msctx->dbproc = dbopen(msctx->login, sqlctx->servername)) == NULL) {
-	  g_set_error(&terr, EECONN, EECONN,
-		      "%s:%d: unable to connect to %s as %s\n",
-		      sqlctx->appname, __LINE__,
-		      sqlctx->servername, sqlctx->username);
-	}
-
-	if (terr == NULL && sqlctx->dbname
-	    && (erc = dbuse(msctx->dbproc, sqlctx->dbname)) == FAIL) {
-	  g_set_error(&terr, EEUSE, EEUSE,
-		      "%s:%d: unable to use to database %s\n",
-		      sqlctx->appname, __LINE__, sqlctx->dbname);
-	}
+	msctx->dbproc = NULL;
       }
-
-      if (terr == NULL && sqlctx->ansi_npw == TRUE)
-	do_exec_sql(npw_sql, msctx, &terr);
 
       if (terr == NULL) {
 	g_mutex_init(&msctx->lock);
@@ -156,12 +141,14 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
       else {
 	g_free(msctx);
       }
-
+      
     }
 
     g_free(npw_sql);
     
   }
+
+  clear_context();
   
   if (terr != NULL)
     g_propagate_error(error, terr);
@@ -184,8 +171,11 @@ msctx_t * get_msctx(GError **error)
     if (lock && wrkctx) {
       
       if (dbdead(wrkctx->dbproc)) {
+#ifdef SQLDEBUG
 	g_message("isdead: reconnect...\n");
-	dbclose(wrkctx->dbproc);
+#endif
+	if (wrkctx->dbproc)
+	  dbclose(wrkctx->dbproc);
 	
 	sqlctx_t *sqlctx = fetch_context(TRUE, &terr);
 	
@@ -301,7 +291,8 @@ void close_context(GError **error)
       
       lock = g_mutex_trylock(&wrkctx->lock);
       if (lock) {
-	dbclose(wrkctx->dbproc);
+	if (wrkctx->dbproc)
+	  dbclose(wrkctx->dbproc);
       }
       else {
 	g_set_error(&terr, EEBUSY, EEBUSY, NULL);

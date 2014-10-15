@@ -157,11 +157,15 @@ sqlctx_t * fetch_context(gboolean load_auth, GError **error)
 
 void clear_context()
 {
-  if (keyctx->sqlctx->username != NULL)
+  if (keyctx->sqlctx->username != NULL) {
     g_free(keyctx->sqlctx->username);
+    keyctx->sqlctx->username = NULL;
+  }
 
-  if (keyctx->sqlctx->password != NULL)
+  if (keyctx->sqlctx->password != NULL) {
     g_free(keyctx->sqlctx->password);
+    keyctx->sqlctx->password = NULL;
+  }
 }
 
 void close_keyfile()
