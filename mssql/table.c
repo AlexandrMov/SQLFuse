@@ -17,9 +17,7 @@
   along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "msctx.h"
 #include "table.h"
-#include "exec.h"
 #include "util.h"
 
 #define ALT_CNSRT(sql, sch, tbl, obj)					\
@@ -138,13 +136,18 @@ char * make_column_def(struct sqlfs_ms_obj *obj)
   return text;
 }
 
-GList * fetch_columns(int tid, const char *name, GError **error)
+GList * fetch_columns(int tid, const char *name, msctx_t *ctx, GError **error)
 {
   GError *terr = NULL;
   GList *reslist = NULL;
   GString *sql = g_string_new(NULL);
-  g_string_append(sql, "SELECT sc.column_id, sc.name");
-  g_string_append(sql, ", sc.system_type_id, sc.max_length");
+
+  if (!tid)
+    g_string_append(sql, "SELECT stab.dir_path + '/' + sc.name");
+  else
+    g_string_append(sql, "sc.name");
+  
+  g_string_append(sql, ", sc.column_id, sc.system_type_id, sc.max_length");
   g_string_append(sql, ", sc.precision, sc.scale, sc.is_nullable");
   g_string_append(sql, ", sc.is_ansi_padded, sc.is_identity, st.name");
   g_string_append(sql, ", CAST(idc.seed_value AS NVARCHAR(MAX))");
@@ -155,24 +158,31 @@ GList * fetch_columns(int tid, const char *name, GError **error)
   g_string_append(sql, " LEFT JOIN sys.identity_columns idc ");
   g_string_append(sql, "  ON idc.object_id = sc.object_id ");
   g_string_append(sql, "    AND idc.column_id = sc.column_id ");
-  g_string_append_printf(sql, " WHERE sc.object_id = %d", tid);
 
-  if (name)
-    g_string_append_printf(sql, " AND sc.name = '%s'", name);
+  if (!tid) {
+    g_string_append(sql, " INNER JOIN #sch_objs stab ");
+    g_string_append(sql, " ON stab.obj_id = sc.object_id\n");
+  }
+  else {
+    g_string_append_printf(sql, " WHERE sc.object_id = %d", tid);
+    
+    if (name)
+      g_string_append_printf(sql, " AND sc.name = '%s'", name);
+  }
 
-  msctx_t *ctx = exec_sql(sql->str, &terr);
+  exec_sql_cmd(sql->str, ctx, &terr);
 
   if (!terr) {
     DBINT col_id_buf, type_id_buf, mlen, precision, scale, nullable,
       ansi, identity, not4repl;
-    char *colname_buf = g_malloc0_n(dbcollen(ctx->dbproc, 2) + 1, sizeof(char ));
+    char *colname_buf = g_malloc0_n(dbcollen(ctx->dbproc, 1) + 1, sizeof(char ));
     char *typename_buf = g_malloc0_n(dbcollen(ctx->dbproc, 10) + 1, sizeof(char ));
     char *seed_val = g_malloc0_n(dbcollen(ctx->dbproc, 11) + 1, sizeof(char ));
     char *inc_val = g_malloc0_n(dbcollen(ctx->dbproc, 12) + 1, sizeof(char ));
 
-    dbbind(ctx->dbproc, 1, INTBIND, (DBINT) 0, (BYTE *) &col_id_buf);
-    dbbind(ctx->dbproc, 2, STRINGBIND,
-	   dbcollen(ctx->dbproc, 2), (BYTE *) colname_buf);
+    dbbind(ctx->dbproc, 1, STRINGBIND,
+	   dbcollen(ctx->dbproc, 1), (BYTE *) colname_buf);
+    dbbind(ctx->dbproc, 2, INTBIND, (DBINT) 0, (BYTE *) &col_id_buf);
     dbbind(ctx->dbproc, 3, INTBIND, (DBINT) 0, (BYTE *) &type_id_buf);
     dbbind(ctx->dbproc, 4, INTBIND, (DBINT) 0, (BYTE *) &mlen);
     dbbind(ctx->dbproc, 5, INTBIND, (DBINT) 0, (BYTE *) &precision);
@@ -237,7 +247,7 @@ GList * fetch_columns(int tid, const char *name, GError **error)
     g_free(inc_val);
   
   }
-  close_sql(ctx);
+
   g_string_free(sql, TRUE);
 
   if (terr != NULL)
@@ -246,24 +256,37 @@ GList * fetch_columns(int tid, const char *name, GError **error)
   return reslist;
 }
 
-GList * fetch_modules(int tid, const char *name, GError **error)
+GList * fetch_modules(int tid, const char *name, msctx_t *ctx, GError **error)
 {
   GError *terr = NULL;
   GList *list = NULL;
   GString *sql = g_string_new(NULL);
-  g_string_truncate(sql, 0);
-  g_string_append(sql, "SELECT so.name, so.object_id, so.type");
+
+  if (!tid)
+    g_string_append(sql, "SELECT stab.dir_path + '/' + so.name");
+  else
+    g_string_append(sql, "SELECT so.name");
+  
+  g_string_append(sql, ", so.object_id, so.type");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, so.create_date)");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, so.modify_date)");
   g_string_append(sql, ", DATALENGTH(sm.definition) ");
   g_string_append(sql, " FROM sys.objects so INNER JOIN sys.sql_modules sm");
-  g_string_append(sql, "   ON so.object_id = sm.object_id");
-  g_string_append_printf(sql, " WHERE so.parent_object_id = %d", tid);
+  g_string_append(sql, "   ON so.object_id = sm.object_id ");
 
-  if (name)
-    g_string_append_printf(sql, " AND so.name = '%s'", name);
-
-  msctx_t *ctx = exec_sql(sql->str, &terr);
+  if (!tid) {
+    g_string_append(sql, "INNER JOIN #sch_objs stab");
+    g_string_append(sql, " ON stab.obj_id = so.parent_object_id\n");
+  }
+  else {
+    g_string_append_printf(sql, " WHERE so.parent_object_id = %d", tid);
+    
+    if (name)
+      g_string_append_printf(sql, " AND so.name = '%s'", name);
+  }
+  
+  exec_sql_cmd(sql->str, ctx, &terr);
+  
   if (!terr) {
     DBINT trg_id_buf;
     DBCHAR type_buf[2];
@@ -311,7 +334,7 @@ GList * fetch_modules(int tid, const char *name, GError **error)
     g_free(trgname_buf);
     
   }
-  close_sql(ctx);
+
   g_string_free(sql, TRUE);
 
   if (terr != NULL)
@@ -355,14 +378,19 @@ char * make_constraint_def(struct sqlfs_ms_obj *ctrt, const char *def)
   return text;
 }
 
-GList * fetch_constraints(int tid, const char *name, GError **error)
+GList * fetch_constraints(int tid, const char *name, msctx_t *ctx, GError **error)
 {
   GList *reslist = NULL;
 
   GError *terr = NULL;
   GString *sql = g_string_new(NULL);
 
-  g_string_append(sql, "SELECT dc.object_id, dc.name, sc.name");
+  if (!tid)
+    g_string_append(sql, "SELECT ss.dir_path + '/' + dc.name");
+  else
+    g_string_append(sql, "SELECT dc.name");
+  
+  g_string_append(sql, ", dc.object_id, sc.name");
   g_string_append(sql, ", dc.definition, dc.type, 0, 0");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, dc.create_date)");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, dc.modify_date)");
@@ -370,35 +398,54 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
   g_string_append(sql, " INNER JOIN sys.default_constraints dc ");
   g_string_append(sql, "  ON dc.parent_column_id = sc.column_id ");
   g_string_append(sql, "    AND dc.parent_object_id = sc.object_id ");
-  g_string_append_printf(sql, "WHERE dc.parent_object_id = %d", tid);
 
-  if (name != NULL)
-    g_string_append_printf(sql, " AND dc.name = '%s'", name);
+  if (!tid) {
+    g_string_append(sql, "INNER JOIN #sch_objs ss ");
+    g_string_append(sql, " ON ss.obj_id = dc.parent_object_id");
 
-  g_string_append(sql, " UNION ALL ");
-  g_string_append(sql, "SELECT cc.object_id, cc.name, ''");
+    g_string_append(sql, " UNION ALL ");
+    g_string_append(sql, "SELECT ss.dir_path + '/' + cc.name");
+  }
+  else {
+    g_string_append_printf(sql, "WHERE dc.parent_object_id = %d", tid);
+    
+    if (name != NULL)
+      g_string_append_printf(sql, " AND dc.name = '%s'", name);
+    
+    g_string_append(sql, " UNION ALL ");
+    g_string_append(sql, "SELECT cc.name");    
+  }
+
+  g_string_append(sql, ", cc.object_id, ''");
   g_string_append(sql, ", cc.definition, cc.type");
   g_string_append(sql, ", cc.is_disabled, cc.is_not_for_replication");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, cc.create_date)");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, cc.modify_date)");
   g_string_append(sql, " FROM sys.check_constraints cc ");
-  g_string_append_printf(sql, "WHERE cc.parent_object_id = %d", tid);
 
-  if (name != NULL)
-    g_string_append_printf(sql, "AND cc.name = '%s'", name);
+  if (!tid) {
+    g_string_append(sql, "INNER JOIN #sch_objs ss ");
+    g_string_append(sql, " ON ss.obj_id = cc.parent_object_id");
+  }
+  else {
+    g_string_append_printf(sql, "WHERE cc.parent_object_id = %d", tid);
+    
+    if (name != NULL)
+      g_string_append_printf(sql, "AND cc.name = '%s'", name);
+  }
 
-  msctx_t *ctx = exec_sql(sql->str, &terr);
+  exec_sql_cmd(sql->str, ctx, &terr);
   if (terr == NULL) {
     DBINT obj_id;
     DBCHAR type_buf[2];
     DBINT cdate_buf, mdate_buf, disabled, not4repl;
-    char *csnt_name = g_malloc0_n(dbcollen(ctx->dbproc, 2) + 1, sizeof(char ));
+    char *csnt_name = g_malloc0_n(dbcollen(ctx->dbproc, 1) + 1, sizeof(char ));
     char *clmn_name = g_malloc0_n(dbcollen(ctx->dbproc, 3) + 1, sizeof(char ));
     char *def_text  = g_malloc0_n(dbcollen(ctx->dbproc, 4) + 1, sizeof(char ));
 
-    dbbind(ctx->dbproc, 1, INTBIND, (DBINT) 0, (BYTE *) &obj_id);
-    dbbind(ctx->dbproc, 2, STRINGBIND,
-	   dbcollen(ctx->dbproc, 2), (BYTE *) csnt_name);
+    dbbind(ctx->dbproc, 1, STRINGBIND,
+	   dbcollen(ctx->dbproc, 1), (BYTE *) csnt_name);
+    dbbind(ctx->dbproc, 2, INTBIND, (DBINT) 0, (BYTE *) &obj_id);
     dbbind(ctx->dbproc, 3, STRINGBIND,
 	   dbcollen(ctx->dbproc, 3), (BYTE *) clmn_name);
     dbbind(ctx->dbproc, 4, STRINGBIND,
@@ -454,7 +501,6 @@ GList * fetch_constraints(int tid, const char *name, GError **error)
     
   }
 
-  close_sql(ctx);
   g_string_free(sql, TRUE);
 
   if (terr != NULL)
@@ -544,13 +590,18 @@ char * make_foreign_def(struct sqlfs_ms_obj *obj)
   return text;
 }
 
-GList * fetch_foreignes(int tid, const char *name, GError **error)
+GList * fetch_foreignes(int tid, const char *name, msctx_t *ctx, GError **error)
 {
   GList *reslist = NULL;
   GError *terr = NULL;
   GString *sql = g_string_new(NULL);
 
-  g_string_append(sql, "SELECT fk.name, fk.object_id, fk.is_disabled");
+  if (!tid)
+    g_string_append(sql, "SELECT sj.dir_path + '/' + fk.name");
+  else
+    g_string_append(sql, "SELECT fk.name");
+    
+  g_string_append(sql, ", fk.object_id, fk.is_disabled");
   g_string_append(sql, ", fk.is_not_for_replication");
   g_string_append(sql, ", fk.delete_referential_action");
   g_string_append(sql, ", fk.update_referential_action");
@@ -574,13 +625,20 @@ GList * fetch_foreignes(int tid, const char *name, GError **error)
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, fk.create_date)");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, fk.modify_date)");
   g_string_append(sql, " FROM sys.foreign_keys fk INNER JOIN sys.objects so_ref");
-  g_string_append(sql, "  ON fk.referenced_object_id = so_ref.object_id");
-  g_string_append_printf(sql, " WHERE fk.parent_object_id = %d", tid);
+  g_string_append(sql, "  ON fk.referenced_object_id = so_ref.object_id ");
 
-  if (name)
-    g_string_append_printf(sql, " AND fk.name = '%s'", name);
+  if (!tid) {
+    g_string_append(sql, "INNER JOIN #sch_objs sj");
+    g_string_append(sql, " ON sj.obj_id = fk.parent_object_id\n");
+  }
+  else {
+    g_string_append_printf(sql, " WHERE fk.parent_object_id = %d", tid);
+    
+    if (name)
+      g_string_append_printf(sql, " AND fk.name = '%s'", name);
+  }
 
-  msctx_t *ctx = exec_sql(sql->str, &terr);
+  exec_sql_cmd(sql->str, ctx, &terr);
   if (!terr) {
     DBINT obj_id, is_not4repl, delact, updact, mdate, cdate, disabled;
     char *name_def = g_malloc0_n(dbcollen(ctx->dbproc, 1) + 1, sizeof(char ));
@@ -666,7 +724,6 @@ GList * fetch_foreignes(int tid, const char *name, GError **error)
     
   }
 
-  close_sql(ctx);
   g_string_free(sql, TRUE);
   
   if (terr != NULL)
@@ -780,16 +837,21 @@ char * make_index_def(const char *schema, const char *table,
   return text;
 }
 
-GList * fetch_indexes(int tid, const char *name, GError **error)
+GList * fetch_indexes(int tid, const char *name, msctx_t *ctx, GError **error)
 {
   GList *reslist = NULL;
   GError *terr = NULL;
   GString *sql = g_string_new(NULL);
 
-  g_string_append(sql, "SELECT so.object_id, so.type");
+  if (!tid)
+    g_string_append(sql, "SELECT sj.dir_path + '/' + si.name");
+  else
+    g_string_append(sql, "SELECT si.name");
+
+  g_string_append(sql, ", so.object_id, so.type");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, so.create_date)");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, so.modify_date)");
-  g_string_append(sql, ", si.name, si.index_id, si.type, si.is_unique");
+  g_string_append(sql, ", si.index_id, si.type, si.is_unique");
   g_string_append(sql, ", si.ignore_dup_key, si.is_primary_key");
   g_string_append(sql, ", si.is_unique_constraint, si.fill_factor");
   g_string_append(sql, ", si.is_padded, si.is_disabled, si.is_hypothetical");
@@ -821,17 +883,27 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
   g_string_append(sql, " FROM sys.objects so INNER JOIN sys.indexes si");
   g_string_append(sql, "   ON si.object_id = so.object_id");
   g_string_append(sql, " INNER JOIN sys.data_spaces ds");
-  g_string_append(sql, "   ON ds.data_space_id = si.data_space_id");
-  g_string_append_printf(sql, " WHERE so.object_id = %d AND si.type <> 0", tid);
+  g_string_append(sql, "   ON ds.data_space_id = si.data_space_id ");
 
-  if (name)
-    g_string_append_printf(sql, " AND si.name = '%s'", name);
+  if (!tid) {
+    g_string_append(sql, "INNER JOIN #sch_objs sj");
+    g_string_append(sql, " ON sj.obj_id = so.object_id\n");
+  }
+  
+  g_string_append_printf(sql, " WHERE si.type <> 0", tid);
 
-  msctx_t *ctx = exec_sql(sql->str, &terr);
+  if (tid) {
+    g_string_append(sql, "AND so.object_id = %d");
+    
+    if (name)
+      g_string_append_printf(sql, " AND si.name = '%s'", name);
+  }
+
+  exec_sql_cmd(sql->str, ctx, &terr);
   if (!terr) {
     DBINT obj_id, index_id, type_id, is_unique, ignr_dup_key, is_pk, is_uqc;
     DBCHAR type_buf[2];
-    char *name_buf = g_malloc0_n(dbcollen(ctx->dbproc, 5) + 1, sizeof(char ));
+    char *name_buf = g_malloc0_n(dbcollen(ctx->dbproc, 1) + 1, sizeof(char ));
     char *filter_def = g_malloc0_n(dbcollen(ctx->dbproc, 19) + 1, sizeof(char ));
     char *col_def = g_malloc0_n(dbcollen(ctx->dbproc, 20) + 1, sizeof(char ));
     char *incl_def = g_malloc0_n(dbcollen(ctx->dbproc, 21) + 1, sizeof(char ));
@@ -841,12 +913,12 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
     DBINT cdate_buf, mdate_buf, fill_factor, is_padded, is_disabled, is_hyp;
     DBINT allow_rl, allow_pl, has_filter;
 
-    dbbind(ctx->dbproc, 1, INTBIND, (DBINT) 0, (BYTE *) &obj_id);
-    dbbind(ctx->dbproc, 2, STRINGBIND, (DBINT) 0, (BYTE *) type_buf);
-    dbbind(ctx->dbproc, 3, INTBIND, (DBINT) 0, (BYTE *) &cdate_buf);
-    dbbind(ctx->dbproc, 4, INTBIND, (DBINT) 0, (BYTE *) &mdate_buf);
-    dbbind(ctx->dbproc, 5, STRINGBIND,
-	   dbcollen(ctx->dbproc, 5), (BYTE *) name_buf);
+    dbbind(ctx->dbproc, 1, STRINGBIND,
+	   dbcollen(ctx->dbproc, 1), (BYTE *) name_buf);
+    dbbind(ctx->dbproc, 2, INTBIND, (DBINT) 0, (BYTE *) &obj_id);
+    dbbind(ctx->dbproc, 3, STRINGBIND, (DBINT) 0, (BYTE *) type_buf);
+    dbbind(ctx->dbproc, 4, INTBIND, (DBINT) 0, (BYTE *) &cdate_buf);
+    dbbind(ctx->dbproc, 5, INTBIND, (DBINT) 0, (BYTE *) &mdate_buf);
     dbbind(ctx->dbproc, 6, INTBIND, (DBINT) 0, (BYTE *) &index_id);
     dbbind(ctx->dbproc, 7, INTBIND, (DBINT) 0, (BYTE *) &type_id);
     dbbind(ctx->dbproc, 8, INTBIND, (DBINT) 0, (BYTE *) &is_unique);
@@ -952,7 +1024,6 @@ GList * fetch_indexes(int tid, const char *name, GError **error)
     g_free(table_name);
   }
   
-  close_sql(ctx);
   g_string_free(sql, TRUE);
 
   if (terr != NULL)

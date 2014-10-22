@@ -17,10 +17,9 @@
   along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "exec.h"
 #include <conf/keyconf.h>
 #include <string.h>
-
+#include "exec.h"
 
 typedef struct {
   GSList *ctxlist;

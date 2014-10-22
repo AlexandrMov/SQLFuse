@@ -20,7 +20,6 @@
 #include <sqlfuse.h>
 #include <conf/keyconf.h>
 #include "msctx.h"
-#include "exec.h"
 
 #include <string.h>
 
@@ -812,6 +811,64 @@ static gpointer deploy_thread(gpointer data) {
   return 0;
 }
 
+static void hotstart(GError **error)
+{
+  GError *terr = NULL;
+  GList *wrk = NULL;
+  GString *sql = g_string_new(NULL);
+  g_mutex_lock(&cache.m);
+
+  msctx_t *ctx = get_msctx(&terr);
+
+  if (terr == NULL) {
+  
+    g_string_append(sql, "CREATE TABLE #schemas (");
+    g_string_append(sql, "dir_path NVARCHAR(MAX), sch_id INT)\n");
+    
+    g_string_append(sql, "CREATE TABLE #sch_objs (");
+    g_string_append(sql, "dir_path NVARCHAR(MAX), obj_id INT");
+    g_string_append(sql, ", obj_type NVARCHAR(5), ctime BIGINT");
+    g_string_append(sql, ", mtime BIGINT, def_len INT )\n");
+
+    exec_sql_cmd(sql->str, ctx, &terr);
+  }
+
+  if (terr == NULL) {
+    wrk = fetch_schemas(NULL, ctx, TRUE, &terr);
+    wrk = g_list_concat(wrk, fetch_schema_obj(FALSE, NULL, ctx, &terr));
+    wrk = g_list_concat(wrk, fetch_table_obj(FALSE, FALSE, NULL, ctx, &terr));
+
+    struct sqlfs_ms_obj *object = NULL;
+    wrk = g_list_first(wrk);
+    while (wrk) {
+      object = wrk->data;
+      gchar *str = object->name;
+      object->name = g_path_get_basename(str);
+      g_hash_table_insert(cache.db_table, g_strdup(str), object);
+      wrk = g_list_next(wrk);
+    }
+    g_list_free(wrk);
+    
+  }
+
+  if (terr == NULL) {
+    g_string_truncate(sql, 0);
+    
+    g_string_append(sql, "DROP TABLE #sch_objs\n");
+    g_string_append(sql, "DROP TABLE #schemas");
+    
+    exec_sql_cmd(sql->str, ctx, &terr);
+  }
+  
+  g_string_free(sql, TRUE);
+  close_sql(ctx);
+  
+  g_mutex_unlock(&cache.m);
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+}
+
 void init_cache(GError **error)
 {
   GError *terr = NULL;
@@ -832,11 +889,14 @@ void init_cache(GError **error)
   deploy.thread = g_thread_new(NULL, &deploy_thread, NULL);
   
   init_msctx(&terr);
+
+  if (terr == NULL) {
+    //hotstart(&terr);
+  }
   
   if (terr != NULL)
     g_propagate_error(error, terr);
 }
-
 
 struct sqlfs_object * find_object(const char *pathfile, GError **error)
 {
@@ -858,7 +918,7 @@ struct sqlfs_object * find_object(const char *pathfile, GError **error)
   continue_timer(paused);
 
   if (terr != NULL)
-    g_propagate_error(error, terr); 
+    g_propagate_error(error, terr);
   
   return result;
 }
@@ -879,24 +939,28 @@ GList * fetch_dir_objects(const char *pathdir, GError **error)
   g_hash_table_foreach_remove(cache.db_table, &clear_dir_files, p);
   g_free(p);
 
+  msctx_t *ctx = get_msctx(&terr);
+
   // получить объекты в соответствии с уровнем
   if (!nschema) {
-    wrk = fetch_schemas(NULL, &terr);
+    wrk = fetch_schemas(NULL, ctx, FALSE, &terr);
   } else {
     object = find_cache_obj(pathdir, &terr);
     if (terr == NULL && !g_hash_table_contains(cache.app_table, pathdir)) {
       if (object->type == D_SCHEMA) 
-	wrk = fetch_schema_obj(object->schema_id, NULL, &terr);
+	wrk = fetch_schema_obj(object->schema_id, NULL, ctx, &terr);
       else
 	if (object->type == D_U || object->type == D_V) {
 	  wrk = fetch_table_obj(object->schema_id, object->object_id,
-				NULL, &terr);
+				NULL, ctx, &terr);
 	}
 	else
 	  g_set_error(&terr, EENOTSUP, EENOTSUP,
 		      "%d: Operation not supported", __LINE__);
     }
   }
+
+  close_sql(ctx);
 
   if (terr == NULL) {
     
@@ -934,7 +998,7 @@ GList * fetch_dir_objects(const char *pathdir, GError **error)
     g_mutex_unlock(&cache.m);
 
   }
-
+  
   continue_timer(paused);
   
   if (terr != NULL)

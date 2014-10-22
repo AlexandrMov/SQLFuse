@@ -17,7 +17,13 @@
   along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "msctx.h"
+#ifndef MSEXEC_H
+#define MSEXEC_H
+
+#include <sybdb.h>
+#include <sybfront.h>
+
+#include <glib.h>
 
 typedef struct {
   LOGINREC *login;
@@ -62,3 +68,5 @@ void close_sql(msctx_t *context);
  * Закрытие контекста
  */
 void close_context(GError **error);
+
+#endif
