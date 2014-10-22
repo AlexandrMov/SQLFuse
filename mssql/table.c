@@ -145,7 +145,7 @@ GList * fetch_columns(int tid, const char *name, msctx_t *ctx, GError **error)
   if (!tid)
     g_string_append(sql, "SELECT stab.dir_path + '/' + sc.name");
   else
-    g_string_append(sql, "sc.name");
+    g_string_append(sql, "SELECT sc.name");
   
   g_string_append(sql, ", sc.column_id, sc.system_type_id, sc.max_length");
   g_string_append(sql, ", sc.precision, sc.scale, sc.is_nullable");
@@ -890,10 +890,10 @@ GList * fetch_indexes(int tid, const char *name, msctx_t *ctx, GError **error)
     g_string_append(sql, " ON sj.obj_id = so.object_id\n");
   }
   
-  g_string_append_printf(sql, " WHERE si.type <> 0", tid);
+  g_string_append(sql, " WHERE si.type <> 0");
 
   if (tid) {
-    g_string_append(sql, "AND so.object_id = %d");
+    g_string_append_printf(sql, "AND so.object_id = %d", tid);
     
     if (name)
       g_string_append_printf(sql, " AND si.name = '%s'", name);

@@ -520,7 +520,7 @@ GList * fetch_schema_obj(int schema_id, const char *name,
   
   GString * sql = g_string_new(NULL);
   if (!schema_id) {
-    g_string_append(sql, "INSERT INTO #sch_objs (dir_path, obj_id,");
+    g_string_append(sql, "INSERT INTO #sch_objs (dir_path, obj_id, ");
     g_string_append(sql, "obj_type, ctime, mtime, def_len)\n");
     g_string_append(sql, "SELECT ss.dir_path + '/' + so.name");
   }
@@ -546,12 +546,17 @@ GList * fetch_schema_obj(int schema_id, const char *name,
       g_string_append_printf(sql, " AND so.name = '%s'", name);
   }
   else {
+    exec_sql_cmd(sql->str, ctx, &terr);
+
+    g_string_truncate(sql, 0);
+
     g_string_append(sql, "SELECT dir_path, obj_id, obj_type,");
-    g_string_append(sql, " ctime, mtime, def_len");
-    g_string_append(sql, "FROM #sc_objs");
+    g_string_append(sql, " ctime, mtime, def_len ");
+    g_string_append(sql, "FROM #sch_objs");
   }
-  
-  exec_sql_cmd(sql->str, ctx, &terr);
+
+  if (terr == NULL)
+    exec_sql_cmd(sql->str, ctx, &terr);
   
   if (!terr) {
     DBINT obj_id_buf;
@@ -613,6 +618,7 @@ GList * fetch_schema_obj(int schema_id, const char *name,
 GList * fetch_schemas(const char *name, msctx_t *ctx, int astart, GError **error)
 {
   GString * sql = g_string_new(NULL);
+  GError *terr = NULL;
   if (astart) {
     g_string_append(sql, "INSERT INTO #schemas (dir_path, sch_id)\n");
     g_string_append(sql, "SELECT '/' + name, ");
@@ -634,12 +640,17 @@ GList * fetch_schemas(const char *name, msctx_t *ctx, int astart, GError **error
   }
 
   if (astart) {
-    g_string_append(sql, "\n SELECT dir_path, sch_id FROM #schemas");
+    exec_sql_cmd(sql->str, ctx, &terr);
+    g_string_truncate(sql, 0);
+
+    g_string_append(sql, "SELECT dir_path, sch_id FROM #schemas");
   }
 
   GList *lst = NULL;
-  GError *terr = NULL;
-  exec_sql_cmd(sql->str, ctx, &terr);
+
+  if (terr == NULL)
+    exec_sql_cmd(sql->str, ctx, &terr);
+  
   if (!terr && ctx) {
     int rowcode;
     DBINT schid_buf;
@@ -647,7 +658,7 @@ GList * fetch_schemas(const char *name, msctx_t *ctx, int astart, GError **error
     dbbind(ctx->dbproc, 1, STRINGBIND, dbcollen(ctx->dbproc, 1) + 1,
 	   (BYTE *) schname_buf);
     dbbind(ctx->dbproc, 2, INTBIND, (DBINT) 0, (BYTE *) &schid_buf);
-    
+
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW: {

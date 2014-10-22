@@ -83,8 +83,8 @@ void init_keyfile(const char *profile, GError **error)
   GError *terr = NULL;
   keyctx = g_try_new0(struct context, 1);
   gchar *curdir = g_get_current_dir();
-  keyctx->filename = g_strconcat(curdir, "/conf/sqlfuse.conf", NULL);
-  keyctx->authfn = g_strconcat(curdir, "/conf/sqlfuse.auth.conf", NULL);
+  keyctx->filename = g_strconcat(g_get_user_config_dir(), "/sqlfuse/sqlfuse.conf", NULL);
+  keyctx->authfn = g_strconcat(g_get_user_config_dir(), "/sqlfuse/sqlfuse.auth.conf", NULL);
 
   GKeyFile *keyfile = g_key_file_new();
   g_key_file_load_from_file(keyfile, keyctx->filename, G_KEY_FILE_NONE, &terr);

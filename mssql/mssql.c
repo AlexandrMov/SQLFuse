@@ -828,26 +828,31 @@ static void hotstart(GError **error)
     g_string_append(sql, "CREATE TABLE #sch_objs (");
     g_string_append(sql, "dir_path NVARCHAR(MAX), obj_id INT");
     g_string_append(sql, ", obj_type NVARCHAR(5), ctime BIGINT");
-    g_string_append(sql, ", mtime BIGINT, def_len INT )\n");
+    g_string_append(sql, ", mtime BIGINT, def_len INT NULL )\n");
 
     exec_sql_cmd(sql->str, ctx, &terr);
   }
 
   if (terr == NULL) {
     wrk = fetch_schemas(NULL, ctx, TRUE, &terr);
-    wrk = g_list_concat(wrk, fetch_schema_obj(FALSE, NULL, ctx, &terr));
-    wrk = g_list_concat(wrk, fetch_table_obj(FALSE, FALSE, NULL, ctx, &terr));
+    if (terr == NULL)
+      wrk = g_list_concat(wrk, fetch_schema_obj(FALSE, NULL, ctx, &terr));
 
-    struct sqlfs_ms_obj *object = NULL;
-    wrk = g_list_first(wrk);
-    while (wrk) {
-      object = wrk->data;
-      gchar *str = object->name;
-      object->name = g_path_get_basename(str);
-      g_hash_table_insert(cache.db_table, g_strdup(str), object);
-      wrk = g_list_next(wrk);
+    if (terr == NULL)
+      wrk = g_list_concat(wrk, fetch_table_obj(FALSE, FALSE, NULL, ctx, &terr));
+
+    if (terr == NULL) {
+      struct sqlfs_ms_obj *object = NULL;
+      wrk = g_list_first(wrk);
+      while (wrk) {
+	object = wrk->data;
+	gchar *str = object->name;
+	object->name = g_path_get_basename(str);
+	g_hash_table_insert(cache.db_table, g_strdup(str), object);
+	wrk = g_list_next(wrk);
+      }
+      g_list_free(wrk);
     }
-    g_list_free(wrk);
     
   }
 
@@ -891,7 +896,7 @@ void init_cache(GError **error)
   init_msctx(&terr);
 
   if (terr == NULL) {
-    //hotstart(&terr);
+    hotstart(&terr);
   }
   
   if (terr != NULL)

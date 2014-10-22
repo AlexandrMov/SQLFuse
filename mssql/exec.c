@@ -112,7 +112,6 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
     }
     
     int i;
-    char *npw_sql = get_npw_sql();
     for (i = 0; i < sqlctx->maxconn; i++) {
       msctx_t *msctx = g_try_new0(msctx_t, 1);
     
@@ -143,8 +142,6 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
       
     }
 
-    g_free(npw_sql);
-    
   }
 
   clear_context();
@@ -194,7 +191,7 @@ msctx_t * get_msctx(GError **error)
 	}
 
 	if (sqlctx->ansi_npw == TRUE && terr == NULL
-	    && do_exec_sql(npw_sql, wrkctx, &terr)) {
+	    && !do_exec_sql(npw_sql, wrkctx, &terr)) {
 	  g_set_error(&terr, EEXEC, EEXEC,
 		      "%s:%d: unable sets init params NPW\n",
 		      sqlctx->appname, __LINE__);
