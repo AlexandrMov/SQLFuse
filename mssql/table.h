@@ -17,6 +17,9 @@
   along with SQLFuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#ifndef MSTABLE_H
+#define MSTABLE_H
+
 #include "msctx.h"
 
 /*
@@ -68,24 +71,31 @@ char * make_foreign_def(struct sqlfs_ms_obj *obj);
 /*
  * Вернёт список столбцов у таблицы %table_id
  */
-GList * fetch_columns(int table_id, const char *name, GError **err);
+GList * fetch_columns(int table_id, const char *name, msctx_t *ctx,
+		      GError **err);
 
 /*
  * Вернёт список триггеров у таблицы %table_id
  */
-GList * fetch_modules(int table_id, const char *name, GError **err);
+GList * fetch_modules(int table_id, const char *name, msctx_t *ctx,
+		      GError **err);
 
 /*
  * Вернёт список индексов и ключей у таблицы %table_id
  */
-GList * fetch_indexes(int table_id, const char *name, GError **err);
+GList * fetch_indexes(int table_id, const char *name, msctx_t *ctx,
+		      GError **err);
 
 /*
  * Вернёт список ограничений CHECK и DEFAULT у таблицы %table_id
  */
-GList * fetch_constraints(int table_id, const char *name, GError **err);
+GList * fetch_constraints(int table_id, const char *name, msctx_t *ctx,
+			  GError **err);
 
 /*
  * Вернёт список ограничений FOREIGN KEY у таблицы %table_id
  */
-GList * fetch_foreignes(int table_id, const char *name, GError **err);
+GList * fetch_foreignes(int table_id, const char *name, msctx_t *ctx,
+			GError **err);
+
+#endif

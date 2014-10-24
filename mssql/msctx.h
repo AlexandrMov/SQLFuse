@@ -26,6 +26,7 @@
 #include <glib.h>
 
 #include <sqlfuse.h>
+#include "exec.h"
 
 #define D_SCHEMA 0x01
 #define D_IT 0x02
@@ -166,20 +167,20 @@ struct sqlfs_ms_obj * find_ms_object(struct sqlfs_ms_obj *parent,
 /*
  * Список объектов корневого уровня
  */
-GList * fetch_schemas(const char *name, GError **error);
-
+GList * fetch_schemas(const char *name, msctx_t *ctx, int astart,
+		      GError **error);
 
 /*
  * Список объектов уровня схемы
  */
-GList * fetch_schema_obj(int schema_id, const char *name,
+GList * fetch_schema_obj(int schema_id, const char *name, msctx_t *ctx,
 			 GError **error);
 
 /*
  * Вернёт список объектов уровня таблицы
  */
 GList * fetch_table_obj(int schema_id, int table_id, const char *name,
-			GError **error);
+			msctx_t *ctx, GError **error);
 
 /*
  * Загрузить полный программный текст модуля

@@ -30,7 +30,7 @@ typedef struct {
   char *filter;
   char **excl_sch;
   
-  gboolean ansi_npw;
+  gboolean ansi_npw, hotstart;
   
   int maxconn, debug, depltime, maxdepl;
 } sqlctx_t;

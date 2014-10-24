@@ -20,7 +20,6 @@
 #include <conf/keyconf.h>
 #include "msctx.h"
 #include "util.h"
-#include "exec.h"
 #include "tsqlcheck.h"
 #include "tsql.tab.h"
 #include "tsql.parser.h"
@@ -88,25 +87,30 @@ struct sqlfs_ms_obj * find_ms_object(struct sqlfs_ms_obj *parent,
 {
   GError *terr = NULL;
   GList *list = NULL;
+
+  msctx_t *ctx = get_msctx(&terr);
+  
   if (!parent) {
-    list = fetch_schemas(name, &terr);
+    list = fetch_schemas(name, ctx, FALSE, &terr);
   }
   else {
     switch (parent->type) {
     case D_SCHEMA:
-      list = fetch_schema_obj(parent->schema_id, name, &terr);
+      list = fetch_schema_obj(parent->schema_id, name, ctx, &terr);
       break;
     case D_S:
     case D_U:
     case D_V:
       list = fetch_table_obj(parent->schema_id, parent->object_id,
-			     name, &terr);
+			     name, ctx, &terr);
       break;
     default:
       g_set_error(&terr, EENOTSUP, EENOTSUP, NULL);
       break;
     }
   }
+
+  close_sql(ctx);
 
   struct sqlfs_ms_obj *result = NULL;
   if (terr != NULL)
@@ -482,27 +486,26 @@ char * rename_ms_object(const char *schema_old, const char *schema_new,
 }
 
 GList * fetch_table_obj(int schema_id, int table_id, const char *name,
-			GError **error)
+			msctx_t *ctx, GError **error)
 {
   GList *reslist = NULL;
   GError *terr = NULL;
 
   /* TODO: Кандидаты на распараллелирование */
-  reslist = fetch_columns(table_id, name, &terr);
+  reslist = fetch_columns(table_id, name, ctx, &terr);
 
   if (terr == NULL)
-    reslist = g_list_concat(reslist, fetch_modules(table_id, name, &terr));
+    reslist = g_list_concat(reslist, fetch_modules(table_id, name, ctx, &terr));
 
   if (terr == NULL)
-    reslist = g_list_concat(reslist, fetch_indexes(table_id, name, &terr));
+    reslist = g_list_concat(reslist, fetch_indexes(table_id, name, ctx, &terr));
+  
+  if (terr == NULL)
+    reslist = g_list_concat(reslist, fetch_constraints(table_id, name, ctx, &terr));
 
   if (terr == NULL)
-    reslist = g_list_concat(reslist, fetch_constraints(table_id, name, &terr));
-
-  if (terr == NULL)
-    reslist = g_list_concat(reslist, fetch_foreignes(table_id, name, &terr));
-
-
+    reslist = g_list_concat(reslist, fetch_foreignes(table_id, name, ctx, &terr));
+  
   if (terr != NULL)
     g_propagate_error(error, terr);
   
@@ -510,36 +513,62 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
 }
 
 GList * fetch_schema_obj(int schema_id, const char *name,
-			 GError **error)
+			 msctx_t *ctx, GError **error)
 {
   GList *lst = NULL;
   GError *terr = NULL;
   
   GString * sql = g_string_new(NULL);
-  g_string_append(sql, "SELECT so.object_id, so.name, so.type");
+  if (!schema_id) {
+    g_string_append(sql, "INSERT INTO #sch_objs (dir_path, obj_id, ");
+    g_string_append(sql, "obj_type, ctime, mtime, def_len)\n");
+    g_string_append(sql, "SELECT ss.dir_path + '/' + so.name");
+  }
+  else
+    g_string_append(sql, "SELECT so.name");
+  
+  g_string_append(sql, ", so.object_id, so.type");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, so.create_date)");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, so.modify_date) ");
   g_string_append(sql, ", DATALENGTH(sm.definition) ");
-  g_string_append(sql, "FROM sys.objects so LEFT JOIN sys.sql_modules sm");
+  g_string_append(sql, "FROM sys.objects so LEFT JOIN sys.sql_modules sm");  
   g_string_append(sql, " ON sm.object_id = so.object_id");
-  g_string_append_printf(sql, " WHERE schema_id = %d", schema_id);
-  g_string_append(sql, " AND parent_object_id = 0");
 
-  if (name)
-    g_string_append_printf(sql, " AND so.name = '%s'", name);
+  if (!schema_id)
+    g_string_append(sql, " INNER JOIN #schemas ss ON ss.sch_id = so.schema_id");
 
-  msctx_t *ctx = exec_sql(sql->str, &terr);
+  g_string_append(sql, " WHERE parent_object_id = 0 \n");
+  
+  if (schema_id) {
+    g_string_append_printf(sql, " AND schema_id = %d", schema_id);
+    
+    if (name)
+      g_string_append_printf(sql, " AND so.name = '%s'", name);
+  }
+  else {
+    exec_sql_cmd(sql->str, ctx, &terr);
+
+    g_string_truncate(sql, 0);
+
+    g_string_append(sql, "SELECT dir_path, obj_id, obj_type,");
+    g_string_append(sql, " ctime, mtime, def_len ");
+    g_string_append(sql, "FROM #sch_objs");
+  }
+
+  if (terr == NULL)
+    exec_sql_cmd(sql->str, ctx, &terr);
+  
   if (!terr) {
     DBINT obj_id_buf;
     DBINT def_len_buf;
-    char * name_buf = g_malloc0_n(dbcollen(ctx->dbproc, 2) + 1,
+    char * name_buf = g_malloc0_n(dbcollen(ctx->dbproc, 1) + 1,
 				  sizeof(char ));
     DBCHAR type_buf[2];
     DBINT cdate_buf, mdate_buf;
 
-    dbbind(ctx->dbproc, 1, INTBIND, (DBINT) 0, (BYTE *) &obj_id_buf);
-    dbbind(ctx->dbproc, 2, STRINGBIND,
-	   dbcollen(ctx->dbproc, 2), (BYTE *) name_buf);
+    dbbind(ctx->dbproc, 1, STRINGBIND,
+	   dbcollen(ctx->dbproc, 1), (BYTE *) name_buf);
+    dbbind(ctx->dbproc, 2, INTBIND, (DBINT) 0, (BYTE *) &obj_id_buf);
     dbbind(ctx->dbproc, 3, STRINGBIND, (DBINT) 0, (BYTE *) type_buf);
     dbbind(ctx->dbproc, 4, INTBIND, (DBINT) 0, (BYTE *) &cdate_buf);
     dbbind(ctx->dbproc, 5, INTBIND, (DBINT) 0, (BYTE *) &mdate_buf);
@@ -578,7 +607,6 @@ GList * fetch_schema_obj(int schema_id, const char *name,
     g_free(name_buf);
   }
   
-  close_sql(ctx);
   g_string_free(sql, TRUE);
 
   if (terr != NULL)
@@ -587,10 +615,18 @@ GList * fetch_schema_obj(int schema_id, const char *name,
   return lst;
 }
 
-GList * fetch_schemas(const char *name, GError **error)
+GList * fetch_schemas(const char *name, msctx_t *ctx, int astart, GError **error)
 {
   GString * sql = g_string_new(NULL);
-  g_string_append(sql, "SELECT schema_id, name FROM sys.schemas ");
+  GError *terr = NULL;
+  if (astart) {
+    g_string_append(sql, "INSERT INTO #schemas (dir_path, sch_id)\n");
+    g_string_append(sql, "SELECT '/' + name, ");
+  }
+  else
+    g_string_append(sql, "SELECT name, ");
+  
+  g_string_append(sql, "schema_id FROM sys.schemas ");
   
   if (name)
     g_string_append_printf(sql, "WHERE name = '%s'", name);
@@ -603,16 +639,25 @@ GList * fetch_schemas(const char *name, GError **error)
     }
   }
 
+  if (astart) {
+    exec_sql_cmd(sql->str, ctx, &terr);
+    g_string_truncate(sql, 0);
+
+    g_string_append(sql, "SELECT dir_path, sch_id FROM #schemas");
+  }
+
   GList *lst = NULL;
-  GError *terr = NULL;
-  msctx_t *ctx = exec_sql(sql->str, &terr);
+
+  if (terr == NULL)
+    exec_sql_cmd(sql->str, ctx, &terr);
+  
   if (!terr && ctx) {
     int rowcode;
     DBINT schid_buf;
-    char * schname_buf = g_malloc0_n(dbcollen(ctx->dbproc, 2) + 1, sizeof(char ));
-    dbbind(ctx->dbproc, 1, INTBIND, (DBINT) 0, (BYTE *) &schid_buf);
-    dbbind(ctx->dbproc, 2, STRINGBIND, dbcollen(ctx->dbproc, 2) + 1,
+    char * schname_buf = g_malloc0_n(dbcollen(ctx->dbproc, 1) + 1, sizeof(char ));
+    dbbind(ctx->dbproc, 1, STRINGBIND, dbcollen(ctx->dbproc, 1) + 1,
 	   (BYTE *) schname_buf);
+    dbbind(ctx->dbproc, 2, INTBIND, (DBINT) 0, (BYTE *) &schid_buf);
 
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
@@ -639,7 +684,6 @@ GList * fetch_schemas(const char *name, GError **error)
     g_free(schname_buf);
   }
   
-  close_sql(ctx);
   g_string_free(sql, TRUE);
 
   if (terr != NULL)
