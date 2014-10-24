@@ -52,11 +52,12 @@ static void load_from_file(GKeyFile *keyfile, const char *group, GError **error)
 
   ADD_KEYVAL(sqlctx->servername, "servername");
   ADD_KEYVAL(sqlctx->dbname, "dbname");
-  
+
   ADD_KEYVAL(sqlctx->to_codeset, "to_codeset");
   ADD_KEYVAL(sqlctx->from_codeset, "from_codeset");
 
   ADD_KEYBOOL(sqlctx->ansi_npw, "ansi_npw");
+  ADD_KEYBOOL(sqlctx->hotstart, "hot_start");
 
   ADD_KEYINT(sqlctx->depltime, "deploy_time");
 
@@ -68,30 +69,29 @@ static void load_from_file(GKeyFile *keyfile, const char *group, GError **error)
   }
 
   ADD_KEYVAL(sqlctx->filter, "filter");
-  
+
   if (g_key_file_has_key(keyfile, group, "exclude_schemas", &terr))
     sqlctx->excl_sch = g_key_file_get_string_list(keyfile, group, "exclude_schemas",
   						  NULL, &terr);
-  
+
   if (terr != NULL)
     g_propagate_error(error, terr);
-  
+
 }
 
 void init_keyfile(const char *profile, GError **error)
 {
   GError *terr = NULL;
   keyctx = g_try_new0(struct context, 1);
-  gchar *curdir = g_get_current_dir();
   keyctx->filename = g_strconcat(g_get_user_config_dir(), "/sqlfuse/sqlfuse.conf", NULL);
   keyctx->authfn = g_strconcat(g_get_user_config_dir(), "/sqlfuse/sqlfuse.auth.conf", NULL);
 
   GKeyFile *keyfile = g_key_file_new();
   g_key_file_load_from_file(keyfile, keyctx->filename, G_KEY_FILE_NONE, &terr);
-  
+
   keyctx->sqlctx = g_try_new0(sqlctx_t, 1);
   if (terr == NULL) {
-    
+
     if (g_key_file_has_group(keyfile, "global")) {
       load_from_file(keyfile, "global", &terr);
     }
@@ -106,12 +106,11 @@ void init_keyfile(const char *profile, GError **error)
 		    __FILE__, __LINE__);
       }
     }
-    
+
   }
-  
+
   g_key_file_free(keyfile);
-  g_free(curdir);
-  
+
   if (terr != NULL)
     g_propagate_error(error, terr);
 }
@@ -125,7 +124,7 @@ sqlctx_t * fetch_context(gboolean load_auth, GError **error)
   sqlctx_t *sqlctx = keyctx->sqlctx;
 
   if (!sqlctx->appname)
-    sqlctx->appname = g_strdup("sqlfuse");
+    sqlctx->appname = g_strdup("SQLFuse");
 
   if (sqlctx->maxconn < 1)
     sqlctx->maxconn = 1;
@@ -182,7 +181,7 @@ void close_keyfile()
   if (sqlctx != NULL) {
     if (sqlctx->appname != NULL)
       g_free(sqlctx->appname);
-    
+
     if (sqlctx->servername != NULL)
       g_free(sqlctx->servername);
 
@@ -197,13 +196,13 @@ void close_keyfile()
 
     if (sqlctx->auth != NULL)
       g_free(sqlctx->auth);
-    
+
     if (sqlctx->excl_sch != NULL && g_strv_length(sqlctx->excl_sch) > 0)
       g_strfreev(sqlctx->excl_sch);
 
     if (sqlctx->filter != NULL)
       g_free(sqlctx->filter);
-    
+
     g_free(sqlctx);
   }
 

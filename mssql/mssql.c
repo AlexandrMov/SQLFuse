@@ -848,7 +848,7 @@ static void hotstart(GError **error)
 	object = wrk->data;
 	gchar *str = object->name;
 	object->name = g_path_get_basename(str);
-	g_hash_table_insert(cache.db_table, g_strdup(str), object);
+	g_hash_table_insert(cache.db_table, str, object);
 	wrk = g_list_next(wrk);
       }
       g_list_free(wrk);
@@ -895,7 +895,7 @@ void init_cache(GError **error)
   
   init_msctx(&terr);
 
-  if (terr == NULL) {
+  if (terr == NULL && get_context()->hotstart) {
     hotstart(&terr);
   }
   
