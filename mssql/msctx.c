@@ -1,4 +1,4 @@
-/*
+/*OA
   Copyright (C) 2013, 2014 Movsunov A.N.
   
   This file is part of SQLFuse
@@ -24,6 +24,20 @@
 #include "tsql.tab.h"
 #include "tsql.parser.h"
 #include "table.h"
+
+
+struct pt_task {
+  GMutex lock;
+  
+  int table_id;
+  char *name;
+  
+  GList *list;
+  GError *error;
+};
+
+GThreadPool *pt_help;
+
 
 static int msg_handler(DBPROCESS *dbproc, DBINT msgno, int msgstate, int severity,
 		       char *msgtext, char *srvname, char *procname, int line)
@@ -69,11 +83,35 @@ static int err_handler(DBPROCESS * dbproc, int severity, int dberr, int oserr,
   return INT_CANCEL;
 }
 
+static void help_thread(gpointer data, gpointer user_data)
+{
+  if (!data)
+    return ;
+    
+  struct pt_task *task = (struct pt_task *) data;
+  g_mutex_lock(&task->lock);
+
+  msctx_t *ctx = get_msctx(&task->error);
+
+  if (task->error == NULL)
+    task->list = fetch_indexes(task->table_id, task->name, ctx, &task->error);
+  
+  if (task->error == NULL)
+    task->list = g_list_concat(task->list, fetch_constraints(task->table_id, task->name, ctx, &task->error));
+
+  close_sql(ctx);
+  
+  g_mutex_unlock(&task->lock);
+}
 
 void init_msctx(GError **error)
 {
   GError *terr = NULL;
   init_context(err_handler, msg_handler, &terr);
+
+  if (get_context()->maxconn > 1)
+    pt_help = g_thread_pool_new(&help_thread, NULL, get_context()->maxconn - 1,
+				FALSE, &terr);
   
   initobjtypes();
   init_checker();
@@ -490,21 +528,61 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
 {
   GList *reslist = NULL;
   GError *terr = NULL;
+  struct pt_task *task = NULL;
 
-  /* TODO: Кандидаты на распараллелирование */
+  if (get_context()->maxconn > 1 && table_id) {
+    task = g_try_new0(struct pt_task, 1);
+
+    if (name != NULL)
+      task->name = g_strdup(name);
+    else
+      task->name = NULL;
+
+    task->error = NULL;
+    task->table_id = table_id;
+    g_mutex_init(&task->lock);
+    
+    g_thread_pool_push(pt_help, task, &terr);
+  }
+  
   reslist = fetch_columns(table_id, name, ctx, &terr);
 
   if (terr == NULL)
     reslist = g_list_concat(reslist, fetch_modules(table_id, name, ctx, &terr));
 
-  if (terr == NULL)
-    reslist = g_list_concat(reslist, fetch_indexes(table_id, name, ctx, &terr));
-  
-  if (terr == NULL)
-    reslist = g_list_concat(reslist, fetch_constraints(table_id, name, ctx, &terr));
+  if (get_context()->maxconn < 2 || !table_id) {
+    
+    if (terr == NULL)
+      reslist = g_list_concat(reslist, fetch_indexes(table_id, name, ctx, &terr));
+    
+    if (terr == NULL)
+      reslist = g_list_concat(reslist, fetch_constraints(table_id, name, ctx, &terr));
+    
+  }
 
   if (terr == NULL)
     reslist = g_list_concat(reslist, fetch_foreignes(table_id, name, ctx, &terr));
+
+  
+  if (get_context()->maxconn > 1 && table_id && terr == NULL) {
+    g_mutex_lock(&task->lock);
+
+    if (task->error != NULL) {
+      terr = g_error_copy(task->error);
+    }
+
+    reslist = g_list_concat(reslist, task->list);
+
+    g_error_free(task->error);
+    g_mutex_unlock(&task->lock);
+    
+    g_mutex_clear(&task->lock);
+    
+    if (task->name != NULL)
+      g_free(task->name);
+    
+    g_free(task);
+  }
   
   if (terr != NULL)
     g_propagate_error(error, terr);
@@ -797,6 +875,10 @@ void free_ms_obj(gpointer msobj)
 
 void close_msctx(GError **error)
 {
+
+  if (get_context()->maxconn > 1)
+    g_thread_pool_free(pt_help, TRUE, TRUE);
+  
   close_checker();
   close_context(error);
   dbexit();
