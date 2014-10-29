@@ -29,8 +29,6 @@ typedef struct {
   LOGINREC *login;
   DBPROCESS *dbproc;
   
-  GMutex lock;
-  
 } msctx_t;
 
 
@@ -38,6 +36,12 @@ typedef struct {
  * Инициализация контекста
  */
 void init_context(gpointer err_handler, gpointer msg_handler, GError **error);
+
+
+/*
+ * Количество свободных подключений
+ */
+int get_free_count_contexts();
 
 
 /*

@@ -87,7 +87,7 @@ static void help_thread(gpointer data, gpointer user_data)
 {
   if (!data)
     return ;
-    
+
   struct pt_task *task = (struct pt_task *) data;
   g_mutex_lock(&task->lock);
 
@@ -97,10 +97,18 @@ static void help_thread(gpointer data, gpointer user_data)
     task->list = fetch_indexes(task->table_id, task->name, ctx, &task->error);
   
   if (task->error == NULL)
-    task->list = g_list_concat(task->list, fetch_constraints(task->table_id, task->name, ctx, &task->error));
+    task->list = g_list_concat(task->list,
+			       fetch_constraints(task->table_id, task->name,
+						 ctx, &task->error)
+			       );
+
+  if (task->error == NULL)
+    task->list = g_list_concat(task->list,
+			       fetch_modules(task->table_id, task->name,
+					     ctx, &task->error));
 
   close_sql(ctx);
-  
+
   g_mutex_unlock(&task->lock);
 }
 
@@ -108,10 +116,10 @@ void init_msctx(GError **error)
 {
   GError *terr = NULL;
   init_context(err_handler, msg_handler, &terr);
+  int maxconn = get_context()->maxconn;
 
-  if (get_context()->maxconn > 1)
-    pt_help = g_thread_pool_new(&help_thread, NULL, get_context()->maxconn - 1,
-				FALSE, &terr);
+  if (maxconn > 1)
+    pt_help = g_thread_pool_new(&help_thread, NULL, maxconn - 1, FALSE, &terr);
   
   initobjtypes();
   init_checker();
@@ -529,8 +537,9 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
   GList *reslist = NULL;
   GError *terr = NULL;
   struct pt_task *task = NULL;
+  int free_conn = get_count_free_contexts();
 
-  if (get_context()->maxconn > 1 && table_id) {
+  if (free_conn && table_id) {
     task = g_try_new0(struct pt_task, 1);
 
     if (name != NULL)
@@ -548,23 +557,20 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
   reslist = fetch_columns(table_id, name, ctx, &terr);
 
   if (terr == NULL)
-    reslist = g_list_concat(reslist, fetch_modules(table_id, name, ctx, &terr));
+    reslist = g_list_concat(reslist, fetch_foreignes(table_id, name, ctx, &terr));
 
-  if (get_context()->maxconn < 2 || !table_id) {
+  if (!free_conn || !table_id) {
+    if (terr == NULL)
+      reslist = g_list_concat(reslist, fetch_modules(table_id, name, ctx, &terr));
     
     if (terr == NULL)
       reslist = g_list_concat(reslist, fetch_indexes(table_id, name, ctx, &terr));
     
     if (terr == NULL)
       reslist = g_list_concat(reslist, fetch_constraints(table_id, name, ctx, &terr));
-    
   }
-
-  if (terr == NULL)
-    reslist = g_list_concat(reslist, fetch_foreignes(table_id, name, ctx, &terr));
-
   
-  if (get_context()->maxconn > 1 && table_id && terr == NULL) {
+  if (free_conn && table_id && terr == NULL) {
     g_mutex_lock(&task->lock);
 
     if (task->error != NULL) {
@@ -573,9 +579,10 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
 
     reslist = g_list_concat(reslist, task->list);
 
-    g_error_free(task->error);
+    if (task->error != NULL)
+      g_error_free(task->error);
+
     g_mutex_unlock(&task->lock);
-    
     g_mutex_clear(&task->lock);
     
     if (task->name != NULL)
