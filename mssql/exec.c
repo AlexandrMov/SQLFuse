@@ -81,6 +81,22 @@ static gboolean do_exec_sql(const char *sql, const msctx_t *ctx, GError **err)
   return TRUE;
 }
 
+static gint sort_contexts(gconstpointer a, gconstpointer b, gpointer user_data)
+{
+  if (a != NULL && b != NULL) {
+    msctx_t *ctx1 = (msctx_t *) a, *ctx2 = (msctx_t *) b;
+    int a1 = dbdead(ctx1->dbproc), b1 = dbdead(ctx2->dbproc);
+
+    if (a1 && !b1)
+      return 1;
+
+    if (!a1 && b1)
+      return -1;
+  }
+
+  return 0;
+}
+
 void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
 {
   GError *terr = NULL;  
@@ -222,7 +238,12 @@ void exec_sql_cmd(const char *sql, msctx_t *msctx, GError **error)
   GError *terr = NULL;
   int i;
   for (i = 0; i < 2; i++) {
+
+    if (terr != NULL)
+      g_clear_error(&terr);
+
     gboolean result = do_exec_sql(sql, msctx, &terr);
+
     if (!result) {
       if (dbdead(msctx->dbproc)) {
 	// попробовать восстановить подключение
@@ -240,6 +261,7 @@ void exec_sql_cmd(const char *sql, msctx_t *msctx, GError **error)
       // выполнение запроса успешно
       break;
     }
+    
   }
 
   if (terr != NULL)
@@ -266,7 +288,9 @@ void close_sql(msctx_t *context)
     return ;
 
   dbfreebuf(context->dbproc);
-  g_async_queue_push(ectx->aqueue, context);
+
+  // не устанавливать дополнительных подключений без необходимости
+  g_async_queue_push_sorted(ectx->aqueue, context, &sort_contexts, NULL);
 }
 
 void close_context(GError **error)
@@ -276,6 +300,8 @@ void close_context(GError **error)
   msctx_t *wrkctx = NULL;
 
   while (i < maxconn) {
+
+    // подождать для закрытия всех подключений
     wrkctx = g_async_queue_pop(ectx->aqueue);
     if (wrkctx->dbproc) {
       dbclose(wrkctx->dbproc);
@@ -288,6 +314,7 @@ void close_context(GError **error)
     g_free(wrkctx);
 
     i++;
+
   }
 
   if (ectx->to_codeset != NULL)
