@@ -29,7 +29,7 @@
 struct pt_task {
   GMutex lock;
   GCond cond;
-  int fetched;
+  gboolean fetched;
   
   int table_id;
   char *name;
@@ -112,7 +112,7 @@ static void help_thread(gpointer data, gpointer user_data)
   close_sql(ctx);
 
   task->fetched = TRUE;
-  
+
   g_cond_signal(&task->cond);
   g_mutex_unlock(&task->lock);
 }
@@ -543,9 +543,11 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
   GList *reslist = NULL;
   GError *terr = NULL;
   struct pt_task *task = NULL;
+
+  // отрицательное, когда есть ожидающие процессы
   int free_conn = get_count_free_contexts();
 
-  if (free_conn && table_id) {
+  if (free_conn > 0 && table_id) {
     task = g_try_new0(struct pt_task, 1);
 
     if (name != NULL)
@@ -564,25 +566,17 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
   
   reslist = fetch_columns(table_id, name, ctx, &terr);
 
+  // необходимо загрузить основной поток
   if (terr == NULL)
     reslist = g_list_concat(reslist, fetch_indexes(table_id, name, ctx, &terr));
 
-  if (!free_conn || !table_id) {
-    if (terr == NULL)
-      reslist = g_list_concat(reslist, fetch_modules(table_id, name, ctx, &terr));
-    
-    if (terr == NULL)
-      reslist = g_list_concat(reslist, fetch_foreignes(table_id, name, ctx, &terr));
-    
-    if (terr == NULL)
-      reslist = g_list_concat(reslist, fetch_constraints(table_id, name, ctx, &terr));
-  }
-  
-  if (free_conn && table_id && terr == NULL) {
+  if (free_conn > 0 && table_id) {
     g_mutex_lock(&task->lock);
 
-    while (!task->fetched)
+    // ждать сигнала о завершении из пула потоков
+    while (!task->fetched) {
       g_cond_wait(&task->cond, &task->lock);
+    }
 
     if (task->error != NULL) {
       terr = g_error_copy(task->error);
@@ -602,10 +596,20 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
     
     g_free(task);
   }
-  
+  else {
+    if (terr == NULL)
+      reslist = g_list_concat(reslist, fetch_modules(table_id, name, ctx, &terr));
+
+    if (terr == NULL)
+      reslist = g_list_concat(reslist, fetch_foreignes(table_id, name, ctx, &terr));
+
+    if (terr == NULL)
+      reslist = g_list_concat(reslist, fetch_constraints(table_id, name, ctx, &terr));
+  }
+
   if (terr != NULL)
     g_propagate_error(error, terr);
-  
+
   return reslist;
 }
 
