@@ -39,7 +39,8 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error);
 
 
 /*
- * Количество свободных подключений
+ * Количество свободных подключений. 
+ * Отрицательное значение, когда есть ожидающие процессы.
  */
 int get_free_count_contexts();
 
