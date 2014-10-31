@@ -46,21 +46,29 @@
 
 <p>Сборка осуществляется путём вызова команд:</p>
 
-<div class="highlight highlight-bash"><pre>make clean
-make
-</pre></div>
-
-<blockquote>
-<p>Установка в систему пока не предусмотрена.</p>
-</blockquote>
+<pre><code>$ make clean
+$ make
+</code></pre>
 
 <p>Вы также можете собрать SQLFuse с опцией <code>DEBUG</code>:</p>
 
-<div class="highlight highlight-bash"><pre>make clean
-make debug
-</pre></div>
+<pre><code>$ make clean
+$ make debug
+</code></pre>
 
 <p>Это позволит увидеть исполняемые SQL-команды при сбросе кэша в БД.</p>
+
+<p>Установка в систему выполняется командой:</p>
+
+<pre><code># make install
+</code></pre>
+
+<p>Удаление выполняется командой:</p>
+
+<pre><code># make uninstall
+</code></pre>
+
+<p>Установка и удаление SQLFuse происходит путём копирования в каталог <code>/usr/bin/</code> или удаления из него исполняемого файла <code>sqlfuse</code>.</p>
 
 <h2>
 <a name="%D0%97%D0%B0%D0%BF%D1%83%D1%81%D0%BA-%D0%B8-%D0%BD%D0%B0%D1%81%D1%82%D1%80%D0%BE%D0%B9%D0%BA%D0%B0" class="anchor" href="#%D0%97%D0%B0%D0%BF%D1%83%D1%81%D0%BA-%D0%B8-%D0%BD%D0%B0%D1%81%D1%82%D1%80%D0%BE%D0%B9%D0%BA%D0%B0"><span class="octicon octicon-link"></span></a>Запуск и настройка</h2>
@@ -74,8 +82,8 @@ make debug
 
 <p>Пример монтирования БД AdventureWorks2008R2:</p>
 
-<div class="highlight highlight-bash"><pre>./sqlfuse -o <span class="nv">profilename</span><span class="o">=</span>AdventureWorks2008R2 ~/myserver/advworks
-</pre></div>
+<pre><code>$ ./sqlfuse -o profilename=AdventureWorks2008R2 ~/myserver/advworks
+</code></pre>
 
 <h2>
 <a name="sqlfuseconf" class="anchor" href="#sqlfuseconf"><span class="octicon octicon-link"></span></a>sqlfuse.conf</h2>
@@ -96,7 +104,7 @@ make debug
 <li>
 <code>appname</code> - задаёт наименование приложения, которое будет передаваться в параметрах подключения к серверу, - по умолчанию SQLFuse;</li>
 <li>
-<code>maxconn</code> - устанавливает количество подключений, которое будет постоянно поддерживать SQLFuse, при соединении с сервером SQL (если Вы используете графическую среду на подобие GNOME или KDE для навигации, желательно указать значение 2 или более), ожидает целочисленное значение;</li>
+<code>maxconn</code> - устанавливает количество подключений, которое будет использовать SQLFuse, при соединении с сервером SQL (рекомендуемое минимальное значение 2, так как это значительно ускоряет процесс работы), ожидает целочисленное значение;</li>
 <li>
 <code>to_codeset</code>, <code>from_codeset</code> - конвертирует текст определений модулей сервера SQL заданную кодировку <code>to_codeset</code> из <code>from_codeset</code> (должен быть установлен <code>iconv</code>), ожидает текстовое значение;</li>
 <li>
