@@ -22,7 +22,7 @@
 #include "exec.h"
 
 typedef struct {
-  GSList *ctxlist;
+  GAsyncQueue *aqueue;
   gchar *to_codeset, *from_codeset;
 } exectx_t;
 
@@ -81,6 +81,22 @@ static gboolean do_exec_sql(const char *sql, const msctx_t *ctx, GError **err)
   return TRUE;
 }
 
+static gint sort_contexts(gconstpointer a, gconstpointer b, gpointer user_data)
+{
+  if (a != NULL && b != NULL) {
+    msctx_t *ctx1 = (msctx_t *) a, *ctx2 = (msctx_t *) b;
+    int a1 = dbdead(ctx1->dbproc), b1 = dbdead(ctx2->dbproc);
+
+    if (a1 && !b1)
+      return 1;
+
+    if (!a1 && b1)
+      return -1;
+  }
+
+  return 0;
+}
+
 void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
 {
   GError *terr = NULL;  
@@ -111,6 +127,8 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
       ectx->from_codeset = g_strdup(sqlctx->from_codeset);
     }
     
+    ectx->aqueue = g_async_queue_new();
+
     int i;
     for (i = 0; i < sqlctx->maxconn; i++) {
       msctx_t *msctx = g_try_new0(msctx_t, 1);
@@ -133,11 +151,10 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
       }
 
       if (terr == NULL) {
-	g_mutex_init(&msctx->lock);
-	ectx->ctxlist = g_slist_append(ectx->ctxlist, msctx);
+	g_async_queue_push(ectx->aqueue, msctx);
       }
       else {
-	g_free(msctx);
+	break;
       }
       
     }
@@ -150,88 +167,65 @@ void init_context(gpointer err_handler, gpointer msg_handler, GError **error)
     g_propagate_error(error, terr);
 }
 
-msctx_t * get_msctx(GError **error)
+int get_count_free_contexts()
 {
-  gboolean lock;
-  int i, len = g_slist_length(ectx->ctxlist);
-  GSList *list = ectx->ctxlist;
-  msctx_t *wrkctx = NULL;
+  return g_async_queue_length(ectx->aqueue);
+}
+
+static void reconnect(msctx_t *wrkctx, GError **error)
+{
   GError *terr = NULL;
   RETCODE erc;
+
   char *npw_sql = get_npw_sql();
-	
-  for (i = 0; i < len; i++) {
-    wrkctx = list->data;
-    lock = g_mutex_trylock(&wrkctx->lock);
 
-    if (lock && wrkctx) {
-      
-      if (dbdead(wrkctx->dbproc)) {
-#ifdef SQLDEBUG
-	g_message("isdead: reconnect...\n");
-#endif
-	if (wrkctx->dbproc)
-	  dbclose(wrkctx->dbproc);
-	
-	sqlctx_t *sqlctx = fetch_context(TRUE, &terr);
-	
-	if ((wrkctx->dbproc = dbopen(wrkctx->login, sqlctx->servername)) == NULL) {
-	  g_set_error(&terr, EECONN, EECONN,
-		      "%s:%d: unable to connect to %s as %s\n",
-		      sqlctx->appname, __LINE__,
-		      sqlctx->servername, sqlctx->username);
-	}
-	
-	if (!terr && sqlctx->dbname
-	    && (erc = dbuse(wrkctx->dbproc, sqlctx->dbname)) == FAIL) {
-	  g_set_error(&terr, EEUSE, EEUSE,
-		      "%s:%d: unable to use to database %s\n",
-		      sqlctx->appname, __LINE__,
-		      sqlctx->dbname);
-	}
+  if (wrkctx->dbproc)
+    dbclose(wrkctx->dbproc);
 
-	if (sqlctx->ansi_npw == TRUE && terr == NULL
-	    && !do_exec_sql(npw_sql, wrkctx, &terr)) {
-	  g_set_error(&terr, EEXEC, EEXEC,
-		      "%s:%d: unable sets init params NPW\n",
-		      sqlctx->appname, __LINE__);
-	}
+  sqlctx_t *sqlctx = fetch_context(TRUE, &terr);
 
-	clear_context();
-	
-      }
-
-      if (terr != NULL) {
-	
-	if (!dbdead(wrkctx->dbproc)) {
-	  g_mutex_unlock(&wrkctx->lock);
-	  break;
-	}
-	
-	g_clear_error(&terr);
-	g_mutex_unlock(&wrkctx->lock);
-	
-      }
-      else {
-	break;
-      }
-      
-    }
-
-    list = g_slist_next(list);
+  if ((wrkctx->dbproc = dbopen(wrkctx->login, sqlctx->servername)) == NULL) {
+    g_set_error(&terr, EECONN, EECONN,
+		"%s:%d: unable to connect to %s as %s\n",
+		sqlctx->appname, __LINE__,
+		sqlctx->servername, sqlctx->username);
   }
 
-  if (!wrkctx || !lock) {
-    list = ectx->ctxlist;
-    
-    if (list && list->data) {
-      wrkctx = list->data;
-      g_mutex_lock(&wrkctx->lock);
-    }
-
+  if (!terr && sqlctx->dbname
+      && (erc = dbuse(wrkctx->dbproc, sqlctx->dbname)) == FAIL) {
+    g_set_error(&terr, EEUSE, EEUSE,
+		"%s:%d: unable to use to database %s\n",
+		sqlctx->appname, __LINE__,
+		sqlctx->dbname);
   }
 
+  if (sqlctx->ansi_npw == TRUE && terr == NULL
+      && !do_exec_sql(npw_sql, wrkctx, &terr)) {
+    g_set_error(&terr, EEXEC, EEXEC,
+		"%s:%d: unable sets init params NPW\n",
+		sqlctx->appname, __LINE__);
+  }
+
+  clear_context();
   g_free(npw_sql);
+
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+}
+
+msctx_t * get_msctx(GError **error)
+{
+  msctx_t *wrkctx = NULL;
+  GError *terr = NULL;
+  
+  wrkctx = g_async_queue_pop(ectx->aqueue);
+
+  if (dbdead(wrkctx->dbproc)) {
+#ifdef SQLDEBUG
+    g_message("isdead: reconnect...\n");
+#endif
+    reconnect(wrkctx, &terr);
+  }
 
   if (terr != NULL)
     g_propagate_error(error, terr);
@@ -242,12 +236,34 @@ msctx_t * get_msctx(GError **error)
 void exec_sql_cmd(const char *sql, msctx_t *msctx, GError **error)
 {
   GError *terr = NULL;
+  int i;
+  for (i = 0; i < 2; i++) {
 
-  if (do_exec_sql(sql, msctx, &terr) == FALSE && !dbdead(msctx->dbproc)) {
-    g_clear_error(&terr);
-    g_set_error(&terr, EECONN, EECONN, "SQL Error: %s\n", sql);
+    if (terr != NULL)
+      g_clear_error(&terr);
+
+    gboolean result = do_exec_sql(sql, msctx, &terr);
+
+    if (!result) {
+      if (dbdead(msctx->dbproc)) {
+	// попробовать восстановить подключение
+	g_usleep(1000000);
+
+	g_clear_error(&terr);
+	reconnect(msctx, &terr);
+      }
+      else {
+	// закончить выполнение с ошибкой
+	break;
+      }
+    }
+    else {
+      // выполнение запроса успешно
+      break;
+    }
+    
   }
-  
+
   if (terr != NULL)
     g_propagate_error(error, terr);
 }
@@ -259,10 +275,10 @@ msctx_t * exec_sql(const char *sql, GError **error)
 
   if (terr == NULL)
     exec_sql_cmd(sql, wrkctx, &terr);
-  
+
   if (terr != NULL)
     g_propagate_error(error, terr);
-  
+
   return wrkctx;
 }
 
@@ -271,31 +287,34 @@ void close_sql(msctx_t *context)
   if (!context)
     return ;
 
-  g_mutex_unlock(&context->lock);
+  dbfreebuf(context->dbproc);
+
+  // не устанавливать дополнительных подключений без необходимости
+  g_async_queue_push_sorted(ectx->aqueue, context, &sort_contexts, NULL);
 }
 
 void close_context(GError **error)
 {
   GError *terr = NULL;
-  int i, len = g_slist_length(ectx->ctxlist);
+  int i = 0, maxconn = get_context()->maxconn;
   msctx_t *wrkctx = NULL;
-  GSList *list = ectx->ctxlist;
-  gboolean lock;
-  
-  for (i = 0; i < len; i++) {
-    if ((wrkctx = list->data) != NULL) {
-      
-      lock = g_mutex_trylock(&wrkctx->lock);
-      if (lock) {
-	if (wrkctx->dbproc)
-	  dbclose(wrkctx->dbproc);
-      }
-      else {
-	g_set_error(&terr, EEBUSY, EEBUSY, NULL);
-      }
-      
+
+  while (i < maxconn) {
+
+    // подождать для закрытия всех подключений
+    wrkctx = g_async_queue_pop(ectx->aqueue);
+    if (wrkctx->dbproc) {
+      dbclose(wrkctx->dbproc);
     }
-    list = g_slist_remove(list, wrkctx);
+
+    if (wrkctx->login) {
+      dbloginfree(wrkctx->login);
+    }
+
+    g_free(wrkctx);
+
+    i++;
+
   }
 
   if (ectx->to_codeset != NULL)
@@ -303,6 +322,8 @@ void close_context(GError **error)
 
   if (ectx->from_codeset != NULL)
     g_free(ectx->from_codeset);
+
+  g_async_queue_unref(ectx->aqueue);
 
   if (terr != NULL)
     g_propagate_error(error, terr);

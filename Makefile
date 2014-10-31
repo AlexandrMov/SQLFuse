@@ -62,6 +62,12 @@ clean:
 	rm -f $(addprefix $(KC_PREFIX), $(KC_OBJS) *~)
 	rm -f *~
 	rm -f *.d *.output
+	
+install:
+	install ./$(PROGRAM) /usr/bin
+	
+uninstall:
+	rm -rf /usr/bin/$(PROGRAM)
 
 $(PROGRAM): $(OBJ_FILES)
 	$(CC) $^ -o $@ $(LIBS) -pipe
