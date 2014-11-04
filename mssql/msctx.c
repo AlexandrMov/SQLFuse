@@ -680,9 +680,11 @@ GList * fetch_schema_obj(int schema_id, const char *name,
       switch(rowcode) {
       case REG_ROW:
 	name_buf = g_strchomp(name_buf);
+	char *typen = g_strndup(type_buf, 2);
 	struct sqlfs_ms_obj *obj = g_try_new0(struct sqlfs_ms_obj, 1);
+	
 	obj->name = g_strdup(name_buf);
-	obj->type = str2mstype(g_strchomp(type_buf));
+	obj->type = str2mstype(g_strchomp(typen));
 	obj->schema_id = schema_id;
 	obj->object_id = obj_id_buf;
 	obj->ctime = cdate_buf;
@@ -692,6 +694,9 @@ GList * fetch_schema_obj(int schema_id, const char *name,
 	    || obj->type == R_FN || obj->type == R_TF || obj->type == R_IF) {
 	  obj->len = def_len_buf;
 	}
+
+	g_free(typen);
+	
 	lst = g_list_append(lst, obj);
 	break;
       case BUF_FULL:
