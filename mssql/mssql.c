@@ -1442,6 +1442,81 @@ void rename_object(const char *oldname, const char *newname, GError **error)
     g_propagate_error(error, terr);
 }
 
+GList * fetch_listxattr(const char *path, GError **error)
+{
+  GError *terr = NULL;
+  GList *listx = NULL;
+
+  // все объекты обладают этими атрибутами
+  listx = g_list_append(listx, "user.sqlfuse.object_id");
+  listx = g_list_append(listx, "user.sqlfuse.type");
+  
+  struct sqlfs_ms_obj *object = find_cache_obj(path, &terr);
+
+  switch(object->type) {
+  case D_V:
+    listx = g_list_append(listx, "user.sqlfuse.viewdef");
+    break;
+  case R_COL:
+    listx = g_list_append(listx, "user.sqlfuse.column_id");
+    break;
+  case R_TR:
+    listx = g_list_append(listx, "user.sqlfuse.trigger.is_disabled");
+  }
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+
+  return listx;
+}
+
+char * fetch_xattr(const char *path, const char *name, GError **error)
+{
+  GError *terr = NULL;
+  gchar *res = NULL;
+
+  gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
+  if (schema == NULL)
+    g_set_error(&terr, EENULL, EENULL,
+		"%d: parent is not defined!", __LINE__);
+  
+  struct sqlfs_ms_obj *object = find_cache_obj(path, &terr);
+  if (terr == NULL) {
+    if (!g_strcmp0(name, "user.sqlfuse.object_id")) {
+      if (object->type == D_SCHEMA)
+	res = g_strdup_printf("%d", object->schema_id);
+      else
+	res = g_strdup_printf("%d", object->object_id);
+    }
+
+    if (!g_strcmp0(name, "user.sqlfuse.column_id")
+	&& object->type == R_COL && object->column != NULL) {
+      res = g_strdup_printf("%d", object->column->column_id);
+    }
+
+    if (!g_strcmp0(name, "user.sqlfuse.type")) {
+      res = g_strdup_printf("%s", mstype2str(object->type));
+    }
+
+    if (!g_strcmp0(name, "user.sqlfuse.viewdef")) {
+      res = load_module_text(*schema, object, &terr);
+    }
+
+    if (!g_strcmp0(name, "user.sqlfuse.trigger.is_disabled")
+	&& object->type == R_TR) {
+      res = g_strdup_printf("%d", object->is_disabled);
+    }
+  }
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+
+  if (g_strv_length(schema) > 0) {
+    g_strfreev(schema);
+  }
+
+  return res;
+}
 
 void free_sqlfs_object(gpointer object)
 {

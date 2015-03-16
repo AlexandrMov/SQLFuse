@@ -24,11 +24,14 @@
 #include "msctx.h"
 
 #define ADD_OBJTYPE(s,d)						\
-  g_hash_table_insert(cache.objtypes, g_strdup(s), GINT_TO_POINTER(d));
+  g_hash_table_insert(cache.objtypes, g_strdup(s), GINT_TO_POINTER(d)); \
+  g_hash_table_insert(cache.objtypenames, GINT_TO_POINTER(d), g_strdup(s));
 
 
 int initobjtypes();
 
 int str2mstype(char * type);
+
+char * mstype2str(int type);
 
 #endif

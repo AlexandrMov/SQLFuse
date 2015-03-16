@@ -152,7 +152,7 @@ GList * fetch_columns(int tid, const char *name, msctx_t *ctx, GError **error)
   g_string_append(sql, ", sc.is_ansi_padded, sc.is_identity, st.name");
   g_string_append(sql, ", CAST(idc.seed_value AS NVARCHAR(MAX))");
   g_string_append(sql, ", CAST(idc.increment_value AS NVARCHAR(MAX))");
-  g_string_append(sql, ", idc.is_not_for_replication");
+  g_string_append(sql, ", idc.is_not_for_replication, sc.object_id");
   g_string_append(sql, " FROM sys.columns sc INNER JOIN sys.types st");
   g_string_append(sql, "  ON st.user_type_id = sc.user_type_id");
   g_string_append(sql, " LEFT JOIN sys.identity_columns idc ");
@@ -174,7 +174,7 @@ GList * fetch_columns(int tid, const char *name, msctx_t *ctx, GError **error)
 
   if (!terr) {
     DBINT col_id_buf, type_id_buf, mlen, precision, scale, nullable,
-      ansi, identity, not4repl;
+      ansi, identity, not4repl, obj_parent_id;
     char *colname_buf = g_malloc0_n(dbcollen(ctx->dbproc, 1) + 1, sizeof(char ));
     char *typename_buf = g_malloc0_n(dbcollen(ctx->dbproc, 10) + 1, sizeof(char ));
     char *seed_val = g_malloc0_n(dbcollen(ctx->dbproc, 11) + 1, sizeof(char ));
@@ -197,6 +197,7 @@ GList * fetch_columns(int tid, const char *name, msctx_t *ctx, GError **error)
     dbbind(ctx->dbproc, 12, STRINGBIND,
 	   dbcollen(ctx->dbproc, 12), (BYTE *) inc_val);
     dbbind(ctx->dbproc, 13, INTBIND, (DBINT) 0, (BYTE *) &not4repl);
+    dbbind(ctx->dbproc, 14, INTBIND, (DBINT) 0, (BYTE *) &obj_parent_id);
   
     int rowcode;
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
@@ -204,7 +205,7 @@ GList * fetch_columns(int tid, const char *name, msctx_t *ctx, GError **error)
       case REG_ROW: {
 	struct sqlfs_ms_obj *obj = g_try_new0(struct sqlfs_ms_obj, 1);
 	
-	obj->object_id = col_id_buf;
+	obj->object_id = obj_parent_id;
 	obj->name = g_strdup(g_strchomp(colname_buf));
 	obj->type = R_COL;
 	obj->parent_id = tid;
@@ -270,9 +271,11 @@ GList * fetch_modules(int tid, const char *name, msctx_t *ctx, GError **error)
   g_string_append(sql, ", so.object_id, so.type");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, so.create_date)");
   g_string_append(sql, ", DATEDIFF(second, {d '1970-01-01'}, so.modify_date)");
-  g_string_append(sql, ", DATALENGTH(sm.definition) ");
+  g_string_append(sql, ", DATALENGTH(sm.definition), tg.is_disabled ");
   g_string_append(sql, " FROM sys.objects so INNER JOIN sys.sql_modules sm");
   g_string_append(sql, "   ON so.object_id = sm.object_id ");
+  g_string_append(sql, " INNER JOIN sys.triggers tg");
+  g_string_append(sql, "   ON tg.object_id = so.object_id ");
 
   if (!tid) {
     g_string_append(sql, "INNER JOIN #sch_objs stab");
@@ -292,7 +295,7 @@ GList * fetch_modules(int tid, const char *name, msctx_t *ctx, GError **error)
     DBCHAR type_buf[2];
     DBINT def_len_buf;
     char *trgname_buf = g_malloc0_n(dbcollen(ctx->dbproc, 1) + 1, sizeof(char ));
-    DBINT cdate_buf, mdate_buf;
+    DBINT cdate_buf, mdate_buf, is_disabled;
 
     dbbind(ctx->dbproc, 1, STRINGBIND,
 	   dbcollen(ctx->dbproc, 1), (BYTE *) trgname_buf);
@@ -301,6 +304,7 @@ GList * fetch_modules(int tid, const char *name, msctx_t *ctx, GError **error)
     dbbind(ctx->dbproc, 4, INTBIND, (DBINT) 0, (BYTE *) &cdate_buf);
     dbbind(ctx->dbproc, 5, INTBIND, (DBINT) 0, (BYTE *) &mdate_buf);
     dbbind(ctx->dbproc, 6, INTBIND, (DBINT) 0, (BYTE *) &def_len_buf);
+    dbbind(ctx->dbproc, 7, INTBIND, (DBINT) 0, (BYTE *) &is_disabled);
   
     int rowcode;
     struct sqlfs_ms_obj * trgobj = NULL;
@@ -319,6 +323,7 @@ GList * fetch_modules(int tid, const char *name, msctx_t *ctx, GError **error)
 	trgobj->ctime = cdate_buf;
 	trgobj->mtime = mdate_buf;
 	trgobj->len = def_len_buf;
+	trgobj->is_disabled = is_disabled;
 
 	g_free(typen);
 
@@ -439,6 +444,7 @@ GList * fetch_constraints(int tid, const char *name, msctx_t *ctx, GError **erro
   }
 
   exec_sql_cmd(sql->str, ctx, &terr);
+  
   if (terr == NULL) {
     DBINT obj_id;
     DBCHAR type_buf[2];

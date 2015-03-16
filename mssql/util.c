@@ -20,17 +20,15 @@
 #include "util.h"
 
 struct cache_util {
-  GHashTable *objtypes;
+  GHashTable *objtypes, *objtypenames;
 };
 
 static struct cache_util cache;
 
 int initobjtypes()
 {
-  if (!cache.objtypes)
-    cache.objtypes = g_hash_table_new(g_str_hash, g_str_equal);
-  else
-    return 0;
+  cache.objtypes = g_hash_table_new(g_str_hash, g_str_equal);
+  cache.objtypenames = g_hash_table_new(g_direct_hash, g_direct_equal);
   
   ADD_OBJTYPE("$H", D_SCHEMA);
   ADD_OBJTYPE("$L", R_COL);
@@ -79,3 +77,8 @@ int str2mstype(char * type)
   return GPOINTER_TO_INT(r);
 }
 
+char * mstype2str(int type)
+{
+  gpointer r = g_hash_table_lookup(cache.objtypenames, GINT_TO_POINTER(type));
+  return r;
+}

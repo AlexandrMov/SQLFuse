@@ -62,6 +62,18 @@
 #define D_TEMP 0x11
 #define R_TEMP 0x99
 
+#define GRANT "G"
+#define GRANTW "W"
+#define DENY "D"
+
+
+struct sqlfs_ms_acl {
+  int state;
+  
+  char *perm;
+  char *principals;
+};
+
 struct sqlfs_ms_type {
   int sys_type_id;
   int user_type_id;
@@ -143,6 +155,8 @@ struct sqlfs_ms_obj {
     struct sqlfs_ms_type *mstype;
     struct sqlfs_ms_index *index;
     struct sqlfs_ms_constraint *clmn_ctrt;
+    
+    int is_disabled; //<! Trigger
   };
   
   char *def;
