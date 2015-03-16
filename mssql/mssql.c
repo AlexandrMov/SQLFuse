@@ -1452,17 +1452,28 @@ GList * fetch_listxattr(const char *path, GError **error)
   listx = g_list_append(listx, "user.sqlfuse.type");
   
   struct sqlfs_ms_obj *object = find_cache_obj(path, &terr);
-
+  int class_id = 1, minor_id = 0;
+  
   switch(object->type) {
+  case D_SCHEMA:
+    class_id = 3;
+    break;
   case D_V:
     listx = g_list_append(listx, "user.sqlfuse.viewdef");
     break;
   case R_COL:
     listx = g_list_append(listx, "user.sqlfuse.column_id");
+    if (object->column != NULL)
+      minor_id = object->column->column_id;
     break;
   case R_TR:
     listx = g_list_append(listx, "user.sqlfuse.trigger.is_disabled");
+    break;
   }
+
+  msctx_t *ctx = get_msctx(&terr);
+  GList *aclist = fetch_acl(class_id, object->object_id, minor_id, ctx, &terr);
+  close_sql(ctx);
   
   if (terr != NULL)
     g_propagate_error(error, terr);

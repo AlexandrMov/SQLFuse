@@ -64,12 +64,12 @@
 
 #define GRANT "G"
 #define GRANTW "W"
+#define REVOKE "R"
 #define DENY "D"
 
 
 struct sqlfs_ms_acl {
-  int state;
-  
+  char *state;
   char *perm;
   char *principals;
 };
@@ -195,6 +195,13 @@ GList * fetch_schema_obj(int schema_id, const char *name, msctx_t *ctx,
  */
 GList * fetch_table_obj(int schema_id, int table_id, const char *name,
 			msctx_t *ctx, GError **error);
+
+/*
+ * Список прав для объекта
+ */
+GList * fetch_acl(int class_id, int major_id, int minor_id,
+		  msctx_t *ctx, GError **error);
+
 
 /*
  * Загрузить полный программный текст модуля
