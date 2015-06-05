@@ -1462,8 +1462,9 @@ GList * fetch_listxattr(const char *path, GError **error)
     break;
   case R_TR:
     listx = g_list_append(listx, "user.sqlfuse.trigger.is_disabled");
+    break;
   }
-  
+
   if (terr != NULL)
     g_propagate_error(error, terr);
 
@@ -1499,13 +1500,14 @@ char * fetch_xattr(const char *path, const char *name, GError **error)
     }
 
     if (!g_strcmp0(name, "user.sqlfuse.viewdef")) {
-      res = load_module_text(*schema, object, &terr);
+      res = fetch_object_text(path, &terr);
     }
 
     if (!g_strcmp0(name, "user.sqlfuse.trigger.is_disabled")
 	&& object->type == R_TR) {
       res = g_strdup_printf("%d", object->is_disabled);
     }
+
   }
   
   if (terr != NULL)
