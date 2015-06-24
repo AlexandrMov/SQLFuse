@@ -1471,10 +1471,6 @@ GList * fetch_listxattr(const char *path, GError **error)
     break;
   }
 
-  msctx_t *ctx = get_msctx(&terr);
-  GList *aclist = fetch_acl(class_id, object->object_id, minor_id, ctx, &terr);
-  close_sql(ctx);
-  
   if (terr != NULL)
     g_propagate_error(error, terr);
 
@@ -1510,13 +1506,14 @@ char * fetch_xattr(const char *path, const char *name, GError **error)
     }
 
     if (!g_strcmp0(name, "user.sqlfuse.viewdef")) {
-      res = load_module_text(*schema, object, &terr);
+      res = fetch_object_text(path, &terr);
     }
 
     if (!g_strcmp0(name, "user.sqlfuse.trigger.is_disabled")
 	&& object->type == R_TR) {
       res = g_strdup_printf("%d", object->is_disabled);
     }
+
   }
   
   if (terr != NULL)

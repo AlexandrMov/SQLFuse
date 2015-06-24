@@ -613,55 +613,56 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
   return reslist;
 }
 
-GList * fetch_acl(int class_id, int major_id, int minor_id,
-		  msctx_t *ctx, GError **error)
+GList * fetch_xattr_list(int major_id, int minor_id, msctx_t *ctx,
+			 GError **error)
 {
   GList *lst = NULL;
   GError *terr = NULL;
-  
-  GString *sql = g_string_new(NULL);
 
-  g_string_append(sql, "SELECT perm.state, perm.type");
-  g_string_append(sql, ", (SELECT '[' + prin.name + '];'");
-  g_string_append(sql, "   FROM sys.database_principals prin");
-  g_string_append(sql, "   WHERE prin.principal_id = perm.grantee_principal_id");
-  g_string_append(sql, "   FOR XML PATH(''), TYPE )");
-  g_string_append(sql, "    .value('.', 'NVARCHAR(MAX)') AS principals");
-  g_string_append(sql, " FROM sys.database_permissions perm");
-  g_string_append_printf(sql, " WHERE perm.class = %d", class_id);
-  g_string_append_printf(sql, "  AND perm.major_id = %d", major_id);
+  GString *sql = g_string_new(NULL);
+  g_string_append(sql, "SELECT ");
+  g_string_append(sql, " perm.[type], perm.[permission_name]");
+  g_string_append(sql, " , prin.name, perm.state_desc ");
+  g_string_append(sql, "FROM sys.database_permissions perm");
+  g_string_append(sql, " INNER JOIN sys.database_principals prin");
+  g_string_append(sql, "   ON prin.principal_id = perm.grantee_principal_id");
+  g_string_append_printf(sql, " WHERE perm.major_id = %d", major_id);
   g_string_append_printf(sql, "  AND perm.minor_id = %d", minor_id);
-  
-  exec_sql_cmd(sql->str, ctx, &terr);
-  
-  if (terr == NULL) {
-    char *state_buf = g_malloc0_n(dbcollen(ctx->dbproc, 1) + 1,
-				   sizeof(char ));
-    char *type_buf = g_malloc0_n(dbcollen(ctx->dbproc, 2) + 1,
+
+  if (terr == NULL)
+    exec_sql_cmd(sql->str, ctx, &terr);
+
+  if (!terr) {
+    char *type_buf = g_malloc0_n(dbcollen(ctx->dbproc, 1) + 1,
+				 sizeof(char ));
+    char *perm_buf = g_malloc0_n(dbcollen(ctx->dbproc, 2) + 1,
+				 sizeof(char ));
+    char *name_buf = g_malloc0_n(dbcollen(ctx->dbproc, 3) + 1,
+				 sizeof(char ));
+    char *state_buf = g_malloc0_n(dbcollen(ctx->dbproc, 4) + 1,
 				  sizeof(char ));
-    char *prins_buf = g_malloc0_n(dbcollen(ctx->dbproc, 3) + 1,
-				   sizeof(char ));
+    
     dbbind(ctx->dbproc, 1, STRINGBIND,
-	   dbcollen(ctx->dbproc, 1), (BYTE *) state_buf);
+	   dbcollen(ctx->dbproc, 1), (BYTE *) type_buf);
     dbbind(ctx->dbproc, 2, STRINGBIND,
-	   dbcollen(ctx->dbproc, 2), (BYTE *) type_buf);
+	   dbcollen(ctx->dbproc, 2), (BYTE *) perm_buf);
     dbbind(ctx->dbproc, 3, STRINGBIND,
-	   dbcollen(ctx->dbproc, 3), (BYTE *) prins_buf);
+	   dbcollen(ctx->dbproc, 3), (BYTE *) name_buf);
+    dbbind(ctx->dbproc, 4, STRINGBIND,
+	   dbcollen(ctx->dbproc, 4), (BYTE *) state_buf);
 
     int rowcode;
     while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
       switch(rowcode) {
       case REG_ROW:
-	state_buf = g_strchomp(state_buf);
-	type_buf = g_strchomp(type_buf);
-	prins_buf = g_strchomp(prins_buf);
-
 	struct sqlfs_ms_acl *acl = g_try_new0(struct sqlfs_ms_acl, 1);
-	acl->state = g_strdup(state_buf);
-	acl->perm = g_strdup(type_buf);
-	acl->principals = g_strdup(prins_buf);
+
+	acl->type = g_strdup(g_strchomp(type_buf));
+	acl->perm_name = g_strdup(g_strchomp(perm_buf));
+	acl->state = g_strdup(g_strchomp(state_buf));
+	acl->principal_name = g_strdup(name_buf);
 	
-	lst = g_list_append(lst, acl);
+    	lst = g_list_append(lst, acl);
 	break;
       case BUF_FULL:
 	g_set_error(&terr, EEFULL, EEFULL,
@@ -673,10 +674,10 @@ GList * fetch_acl(int class_id, int major_id, int minor_id,
 	break;
       }
     }
-    
-    g_free(state_buf);
     g_free(type_buf);
-    g_free(prins_buf);
+    g_free(perm_buf);
+    g_free(name_buf);
+    g_free(state_buf);
   }
   
   g_string_free(sql, TRUE);

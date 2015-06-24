@@ -69,9 +69,11 @@
 
 
 struct sqlfs_ms_acl {
+  char *type;
+  char *perm_name;
+
   char *state;
-  char *perm;
-  char *principals;
+  char *principal_name;
 };
 
 struct sqlfs_ms_type {
@@ -161,6 +163,9 @@ struct sqlfs_ms_obj {
   
   char *def;
   unsigned int len;
+
+  // список разрешений struct sqlfs_ms_acl
+  GList *acls;
   
   time_t ctime;
   time_t mtime;
@@ -197,11 +202,11 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
 			msctx_t *ctx, GError **error);
 
 /*
- * Список прав для объекта
- */
-GList * fetch_acl(int class_id, int major_id, int minor_id,
-		  msctx_t *ctx, GError **error);
 
+ * Список расширенных атрибутов объекта, включая разрешения
+ */
+GList * fetch_xattr_list(int major_id, int minor_id, msctx_t *ctx,
+			 GError **error);
 
 /*
  * Загрузить полный программный текст модуля
