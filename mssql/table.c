@@ -309,15 +309,19 @@ GList * fetch_modules(int tid, const char *name, msctx_t *ctx, GError **error)
       switch(rowcode) {
       case REG_ROW:
 	trgname_buf = g_strchomp(trgname_buf);
+	char *typen = g_strndup(type_buf, 2);
 	trgobj = g_try_new0(struct sqlfs_ms_obj, 1);
+	
 	trgobj->object_id = trg_id_buf;
 	trgobj->name = g_strdup(trgname_buf);
-	trgobj->type = str2mstype(g_strchomp(type_buf));
+	trgobj->type = str2mstype(g_strchomp(typen));
 	trgobj->parent_id = tid;
 	trgobj->ctime = cdate_buf;
 	trgobj->mtime = mdate_buf;
 	trgobj->len = def_len_buf;
-        
+
+	g_free(typen);
+
 	list = g_list_append(list, trgobj);
 	break;
       case BUF_FULL:
@@ -463,12 +467,13 @@ GList * fetch_constraints(int tid, const char *name, msctx_t *ctx, GError **erro
       switch(rowcode) {
       case REG_ROW:
 	obj = g_try_new0(struct sqlfs_ms_obj, 1);
+	char *typen = g_strndup(type_buf, 2);
 	obj->object_id = obj_id;
 	obj->parent_id = tid;
 	obj->name = g_strdup(g_strchomp(csnt_name));
 	obj->mtime = mdate_buf;
 	obj->ctime = cdate_buf;
-	obj->type = str2mstype(g_strchomp(type_buf));
+	obj->type = str2mstype(g_strchomp(typen));
 
 	obj->clmn_ctrt =  g_try_new0(struct sqlfs_ms_constraint, 1);
 
@@ -481,6 +486,8 @@ GList * fetch_constraints(int tid, const char *name, msctx_t *ctx, GError **erro
 	
 	obj->def = make_constraint_def(obj, g_strchomp(def_text));
 	obj->len = strlen(obj->def);
+
+	g_free(typen);
 
 	reslist = g_list_append(reslist, obj);
 	break;
