@@ -29,7 +29,8 @@ int initobjtypes()
 {
   cache.objtypes = g_hash_table_new(g_str_hash, g_str_equal);
   cache.objtypenames = g_hash_table_new(g_direct_hash, g_direct_equal);
-  
+
+  ADD_OBJTYPE("$D", D_DB);
   ADD_OBJTYPE("$H", D_SCHEMA);
   ADD_OBJTYPE("$L", R_COL);
   ADD_OBJTYPE("$T", R_TYPE);
