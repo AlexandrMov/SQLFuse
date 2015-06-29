@@ -139,11 +139,23 @@ struct sqlfs_ms_obj * find_ms_object(struct sqlfs_ms_obj *parent,
 {
   GError *terr = NULL;
   GList *list = NULL;
+  struct sqlfs_ms_obj *result = NULL;
 
   msctx_t *ctx = get_msctx(&terr);
   
   if (!parent) {
-    list = fetch_schemas(name, ctx, FALSE, &terr);
+
+    // информация по базе данных
+    if (!g_strcmp0(name, "/")) {
+      result = g_try_new0(struct sqlfs_ms_obj, 1);
+      result->name = g_strdup(name);
+      result->type = D_DB;
+    }
+    // список схем
+    else {
+      list = fetch_schemas(name, ctx, FALSE, &terr);
+    }
+    
   }
   else {
     switch (parent->type) {
@@ -161,10 +173,9 @@ struct sqlfs_ms_obj * find_ms_object(struct sqlfs_ms_obj *parent,
       break;
     }
   }
-
-  close_sql(ctx);
-
-  struct sqlfs_ms_obj *result = NULL;
+  
+  close_sql(ctx);  
+  
   if (terr != NULL)
     g_propagate_error(error, terr);
   else
@@ -172,7 +183,6 @@ struct sqlfs_ms_obj * find_ms_object(struct sqlfs_ms_obj *parent,
       result = g_list_first(list)->data;
       g_list_free(list);
     }
-      
   
   return result;
 }
@@ -611,6 +621,88 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
     g_propagate_error(error, terr);
 
   return reslist;
+}
+
+GList * fetch_xattr_list(int class_id, int major_id, int minor_id,
+			 msctx_t *ctx, GError **error)
+{
+  GList *lst = NULL;
+  GError *terr = NULL;
+
+  GString *sql = g_string_new(NULL);
+  g_string_append(sql, "SELECT ");
+  g_string_append(sql, " perm.type, perm.permission_name");
+  g_string_append(sql, " , prin.name, perm.state, perm.state_desc ");
+  g_string_append(sql, "FROM sys.database_permissions perm");
+  g_string_append(sql, " INNER JOIN sys.database_principals prin");
+  g_string_append(sql, "   ON prin.principal_id = perm.grantee_principal_id");
+  g_string_append_printf(sql, " WHERE perm.major_id = %d", major_id);
+  g_string_append_printf(sql, "  AND perm.minor_id = %d", minor_id);
+  g_string_append_printf(sql, "  AND perm.class = %d", class_id);
+
+  if (terr == NULL)
+    exec_sql_cmd(sql->str, ctx, &terr);
+
+  if (!terr) {
+    DBCHAR state_buf[2], type_buf[5];
+    
+    char *perm_buf = g_malloc0_n(dbcollen(ctx->dbproc, 2) + 1,
+				 sizeof(char ));
+    char *name_buf = g_malloc0_n(dbcollen(ctx->dbproc, 3) + 1,
+				 sizeof(char ));
+    
+    char *state_desc_buf = g_malloc0_n(dbcollen(ctx->dbproc, 5) + 1,
+				       sizeof(char ));
+    
+    dbbind(ctx->dbproc, 1, STRINGBIND, (DBINT) 0, (BYTE *) type_buf);
+    
+    dbbind(ctx->dbproc, 2, STRINGBIND,
+	   dbcollen(ctx->dbproc, 2), (BYTE *) perm_buf);
+    dbbind(ctx->dbproc, 3, STRINGBIND,
+	   dbcollen(ctx->dbproc, 3), (BYTE *) name_buf);
+
+    dbbind(ctx->dbproc, 4, STRINGBIND, (DBINT) 0, (BYTE *) state_buf);
+    
+    dbbind(ctx->dbproc, 5, STRINGBIND,
+	   dbcollen(ctx->dbproc, 5), (BYTE *) state_desc_buf);
+
+    int rowcode;
+    struct sqlfs_ms_acl *acl = NULL;
+    while (!terr && (rowcode = dbnextrow(ctx->dbproc)) != NO_MORE_ROWS) {
+      switch(rowcode) {
+      case REG_ROW:
+	acl = g_try_new0(struct sqlfs_ms_acl, 1);
+
+	acl->type = g_strdup(g_strchomp(type_buf));
+	acl->perm_name = g_strdup(g_strchomp(perm_buf));
+	acl->state = g_strdup(g_strchomp(state_buf));
+	acl->state_desc = g_strdup(g_strchomp(state_desc_buf));
+	acl->principal_name = g_strdup(g_strchomp(name_buf));
+	
+    	lst = g_list_append(lst, acl);
+	break;
+      case BUF_FULL:
+	g_set_error(&terr, EEFULL, EEFULL,
+		    "%d: dbresults failed\n", __LINE__);
+	break;
+      case FAIL:
+	g_set_error(&terr, EERES, EERES,
+		    "%d: dbresults failed\n", __LINE__);
+	break;
+      }
+    }
+    
+    g_free(perm_buf);
+    g_free(name_buf);
+    g_free(state_desc_buf);
+  }
+  
+  g_string_free(sql, TRUE);
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+  
+  return lst;
 }
 
 GList * fetch_schema_obj(int schema_id, const char *name,

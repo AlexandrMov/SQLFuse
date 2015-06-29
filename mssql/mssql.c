@@ -19,7 +19,9 @@
 
 #include <sqlfuse.h>
 #include <conf/keyconf.h>
+
 #include "msctx.h"
+#include "util.h"
 
 #include <string.h>
 
@@ -182,14 +184,21 @@ static struct sqlfs_ms_obj * do_find(const char *pathname, GError **error)
 
   unsigned int i = 0;
   const char *pn = g_path_skip_root(pathname);
-  if (pn == NULL)
+  char **tree = NULL;
+  if (pn == NULL || strlen(pn) < 2) {
     pn = pathname;
-
-  char **tree = g_strsplit(pn, G_DIR_SEPARATOR_S, -1);
+    tree = g_malloc0_n(2, sizeof(char *));
+    *tree = g_strdup(pn);
+  }
+  else {
+    tree = g_strsplit(pn, G_DIR_SEPARATOR_S, -1);
+  }
+  
   GString *path = g_string_new(NULL);
   
   while(*tree && !terr) {
     g_string_append_printf(path, "%s%s", G_DIR_SEPARATOR_S, *tree);
+  
     struct sqlfs_ms_obj *obj = g_hash_table_lookup(cache.db_table, path->str);
     
     if (!obj) {
@@ -270,8 +279,8 @@ static struct sqlfs_ms_obj * find_cache_obj(const char *pathname, GError **error
   }
 
   if (terr != NULL)
-    g_propagate_error(error, terr); 
-  
+    g_propagate_error(error, terr);
+
   return obj;
 }
 
@@ -1442,6 +1451,127 @@ void rename_object(const char *oldname, const char *newname, GError **error)
     g_propagate_error(error, terr);
 }
 
+GList * fetch_listxattr(const char *path, GError **error)
+{
+  GError *terr = NULL;
+  GList *listx = NULL;
+
+  // все объекты обладают этими атрибутами
+  listx = g_list_append(listx, "user.sqlfuse.object_id");
+  listx = g_list_append(listx, "user.sqlfuse.type");
+
+  int class_id = 1, major_id = 0, minor_id = 0;
+
+  if (!g_strcmp0(path, "/"))
+    class_id = 0;
+  
+  struct sqlfs_ms_obj *object = find_cache_obj(path, &terr);
+
+  if (terr == NULL) {
+    major_id = object->object_id;
+    
+    switch(object->type) {
+    case D_SCHEMA:
+      class_id = 3;
+      major_id = object->schema_id;
+      break;
+    case D_V:
+      listx = g_list_append(listx, "user.sqlfuse.viewdef");
+      break;
+    case R_COL:
+      listx = g_list_append(listx, "user.sqlfuse.column_id");
+      if (object->column != NULL)
+	minor_id = object->column->column_id;
+      break;
+    case R_TR:
+      listx = g_list_append(listx, "user.sqlfuse.trigger.is_disabled");
+      break;
+    }
+
+    if (!object->acls) {
+      msctx_t *ctx = get_msctx(&terr);
+
+      //список разрешений для объекта
+      object->acls = fetch_xattr_list(class_id, major_id, minor_id,
+				      ctx, &terr);
+    
+      close_sql(ctx);
+    }
+
+    if (object->acls && terr == NULL) {
+      GList *wrk = g_list_first(object->acls);
+      struct sqlfs_ms_acl *acl = NULL;
+      while(wrk) {
+	acl = wrk->data;
+	gchar *str = g_strjoin(".", "user.sqlfuse.rights",
+			       acl->principal_name, acl->state, acl->type,
+			       NULL);
+	listx = g_list_append(listx, str);
+	wrk = g_list_next(wrk);
+      }
+    }
+    
+  }
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+
+  return listx;
+}
+
+char * fetch_xattr(const char *path, const char *name, GError **error)
+{
+  GError *terr = NULL;
+  gchar *res = NULL;
+
+  gchar **schema = g_strsplit(g_path_skip_root(path), G_DIR_SEPARATOR_S, -1);
+  if (schema == NULL)
+    g_set_error(&terr, EENULL, EENULL,
+		"%d: parent is not defined!", __LINE__);
+  
+  struct sqlfs_ms_obj *object = find_cache_obj(path, &terr);
+  if (terr == NULL) {
+    if (!g_strcmp0(name, "user.sqlfuse.object_id")) {
+      if (object->type == D_SCHEMA)
+	res = g_strdup_printf("%d", object->schema_id);
+      else
+	res = g_strdup_printf("%d", object->object_id);
+    }
+
+    if (!g_strcmp0(name, "user.sqlfuse.column_id")
+	&& object->type == R_COL && object->column != NULL) {
+      res = g_strdup_printf("%d", object->column->column_id);
+    }
+
+    if (!g_strcmp0(name, "user.sqlfuse.type")) {
+      res = g_strdup_printf("%s", mstype2str(object->type));
+    }
+
+    if (!g_strcmp0(name, "user.sqlfuse.viewdef")) {
+      res = fetch_object_text(path, &terr);
+    }
+
+    if (!g_strcmp0(name, "user.sqlfuse.trigger.is_disabled")
+	&& object->type == R_TR) {
+      res = g_strdup_printf("%d", object->is_disabled);
+    }
+
+    if (g_str_has_prefix(name, "user.sqlfuse.rights.")
+	&& object->acls) {
+      res = g_strdup_printf("%d", 1);
+    }
+
+  }
+  
+  if (terr != NULL)
+    g_propagate_error(error, terr);
+
+  if (g_strv_length(schema) > 0) {
+    g_strfreev(schema);
+  }
+
+  return res;
+}
 
 void free_sqlfs_object(gpointer object)
 {

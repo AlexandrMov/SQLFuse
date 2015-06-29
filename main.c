@@ -428,6 +428,59 @@ static int sqlfs_rename(const char *oldname, const char *newname)
   return err;
 }
 
+static int sqlfs_listxattr(const char *path, char *list, size_t size)
+{
+  int res = 0;
+
+  GError *terr = NULL;
+  GList *listx = fetch_listxattr(path, &terr);
+  
+  if (listx != NULL) {
+    listx = g_list_first(listx);
+    
+    while (listx) {
+      gchar *str = (gchar *) listx->data;
+
+      if (size >= res + strlen(str) + 1) {
+	memcpy(list + res, str, strlen(str) + 1);
+      }
+
+      res += strlen(str) + 1;
+      listx = g_list_next(listx);
+    }
+    
+    listx = g_list_first(listx);
+    g_list_free(listx);
+  }
+
+  if (terr != NULL)
+    g_error_free(terr);
+
+  return res;
+}
+
+static int sqlfs_getxattr(const char *path, const char *name,
+			  char *value, size_t size)
+{
+  int res = 0;
+  GError *terr = NULL;
+
+  char *xattr = fetch_xattr(path, name, &terr);
+  if (terr == NULL && xattr != NULL) {
+    
+    if (size >= strlen(xattr)) {
+      memcpy(value, xattr, strlen(xattr));
+    }
+    
+    res = strlen(xattr);
+  }
+  
+  if (terr != NULL)
+    g_error_free(terr);
+  
+  return res;
+}
+
 static void free_sqlfs_file(gpointer pointer)
 {
   sqlfs_file_t *fsfile = (sqlfs_file_t *) pointer;
@@ -456,6 +509,8 @@ static struct fuse_operations sqlfs_oper = {
   .truncate = sqlfs_truncate,
   .flush = sqlfs_flush,
   .release = sqlfs_release,
+  .listxattr = sqlfs_listxattr,
+  .getxattr = sqlfs_getxattr,
 };
 
 static int sqlfs_fuse_main(struct fuse_args *args)

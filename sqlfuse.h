@@ -133,4 +133,16 @@ void free_sqlfs_object(gpointer object);
 void destroy_cache(GError **error);
 
 
+/*
+ * Получить список доступных расширенных атрибутов для объекта
+ */
+GList * fetch_listxattr(const char *path, GError **error);
+
+
+/*
+ * Получить значение расширенного атрибута
+ */
+char * fetch_xattr(const char *path, const char *name, GError **error);
+
+
 #endif
