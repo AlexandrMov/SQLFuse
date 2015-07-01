@@ -57,7 +57,7 @@ static gboolean do_exec_sql(const char *sql, const msctx_t *ctx, GError **err)
   else {
     sqlconv = g_strdup(sql);
   }
-  
+
   if ((dbcmd(ctx->dbproc, sqlconv) == FAIL)) {
     g_set_error(err, EECMD, EECMD,
 		"%d: dbcmd() failed\n", __LINE__);

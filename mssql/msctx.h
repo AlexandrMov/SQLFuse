@@ -70,6 +70,7 @@
 
 
 struct sqlfs_ms_acl {
+  char *path;
   char *type;
   char *perm_name;
 

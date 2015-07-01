@@ -630,15 +630,46 @@ GList * fetch_xattr_list(int class_id, int major_id, int minor_id,
   GError *terr = NULL;
 
   GString *sql = g_string_new(NULL);
-  g_string_append(sql, "SELECT ");
-  g_string_append(sql, " perm.type, perm.permission_name");
-  g_string_append(sql, " , prin.name, perm.state, perm.state_desc ");
-  g_string_append(sql, "FROM sys.database_permissions perm");
-  g_string_append(sql, " INNER JOIN sys.database_principals prin");
-  g_string_append(sql, "   ON prin.principal_id = perm.grantee_principal_id");
-  g_string_append_printf(sql, " WHERE perm.major_id = %d", major_id);
-  g_string_append_printf(sql, "  AND perm.minor_id = %d", minor_id);
-  g_string_append_printf(sql, "  AND perm.class = %d", class_id);
+
+  if (class_id < 0) {
+    // привилегии для схем
+    g_string_append(sql, "SELECT perm.type, perm.permission_name");
+    g_string_append(sql, ", prin.name, perm.state, perm.state_desc ");
+    g_string_append(sql, ", ss.dir_path ");
+    g_string_append(sql, "FROM #schemas ss");
+    g_string_append(sql, " INNER JOIN sys.database_permissions perm");
+    g_string_append(sql, "  ON perm.major_id = ss.sch_id ");
+    g_string_append(sql, " INNER JOIN sys.database_principals prin");
+    g_string_append(sql, "   ON prin.principal_id = perm.grantee_principal_id");
+    g_string_append(sql, " WHERE perm.class = 3 AND minor_id = 0");
+
+    g_string_append(sql, "\nUNION ALL\n");
+    
+    // привилегии для остальных объектов    
+    g_string_append(sql, "SELECT DISTINCT ");
+    g_string_append(sql, "perm.type, perm.permission_name");
+    g_string_append(sql, ", prin.name, perm.state, perm.state_desc ");
+    g_string_append(sql, ", sb.dir_path + ISNULL('/' + sc.name, '') ");
+    g_string_append(sql, "FROM #sch_objs sb");
+    g_string_append(sql, " INNER JOIN sys.database_permissions perm");
+    g_string_append(sql, "  ON perm.major_id = sb.obj_id");
+    g_string_append(sql, " LEFT JOIN sys.columns sc");
+    g_string_append(sql, "  ON sc.object_id = perm.major_id");
+    g_string_append(sql, "   AND perm.minor_id = sc.column_id");
+    g_string_append(sql, " INNER JOIN sys.database_principals prin");
+    g_string_append(sql, "  ON prin.principal_id = perm.grantee_principal_id");
+    g_string_append(sql, " WHERE perm.class IN (1, 6)");
+  }
+  else {
+    g_string_append(sql, "SELECT perm.type, perm.permission_name");
+    g_string_append(sql, " , prin.name, perm.state, perm.state_desc ");
+    g_string_append(sql, "FROM sys.database_permissions perm");
+    g_string_append(sql, " INNER JOIN sys.database_principals prin");
+    g_string_append(sql, "   ON prin.principal_id = perm.grantee_principal_id");
+    g_string_append_printf(sql, " WHERE perm.major_id = %d", major_id);
+    g_string_append_printf(sql, "  AND perm.minor_id = %d", minor_id);
+    g_string_append_printf(sql, "  AND perm.class = %d", class_id);
+  }
 
   if (terr == NULL)
     exec_sql_cmd(sql->str, ctx, &terr);
@@ -653,6 +684,13 @@ GList * fetch_xattr_list(int class_id, int major_id, int minor_id,
     
     char *state_desc_buf = g_malloc0_n(dbcollen(ctx->dbproc, 5) + 1,
 				       sizeof(char ));
+    char *path_buf = NULL;
+    if (class_id < 0) {
+      path_buf = g_malloc0_n(dbcollen(ctx->dbproc, 6) + 1,
+			     sizeof(char ));
+      dbbind(ctx->dbproc, 6, STRINGBIND,
+	     dbcollen(ctx->dbproc, 6), (BYTE *) path_buf);
+    }
     
     dbbind(ctx->dbproc, 1, STRINGBIND, (DBINT) 0, (BYTE *) type_buf);
     
@@ -678,6 +716,9 @@ GList * fetch_xattr_list(int class_id, int major_id, int minor_id,
 	acl->state = g_strdup(g_strchomp(state_buf));
 	acl->state_desc = g_strdup(g_strchomp(state_desc_buf));
 	acl->principal_name = g_strdup(g_strchomp(name_buf));
+
+	if (class_id < 0)
+	  acl->path = g_strdup(path_buf);
 	
     	lst = g_list_append(lst, acl);
 	break;
@@ -695,6 +736,9 @@ GList * fetch_xattr_list(int class_id, int major_id, int minor_id,
     g_free(perm_buf);
     g_free(name_buf);
     g_free(state_desc_buf);
+
+    if (class_id < 0)
+      g_free(path_buf);
   }
   
   g_string_free(sql, TRUE);
@@ -890,6 +934,25 @@ GList * fetch_schemas(const char *name, msctx_t *ctx, int astart, GError **error
   return lst;
 }
 
+static void free_ms_acl_obj (gpointer obj)
+{
+  if (!obj)
+    return ;
+  
+  struct sqlfs_ms_acl *acl = (struct sqlfs_ms_acl *) obj;
+
+  if (acl->path) {
+    g_free(acl->path);
+  }
+  
+  g_free(acl->type);
+  g_free(acl->perm_name);
+  g_free(acl->state);
+  g_free(acl->state_desc);
+  g_free(acl->principal_name);
+  
+}
+
 void free_ms_obj(gpointer msobj)
 {
   if (!msobj)
@@ -981,6 +1044,8 @@ void free_ms_obj(gpointer msobj)
     break;
   }
 
+  g_list_free_full(obj->acls, &free_ms_acl_obj);
+  
   if (obj->def != NULL)
     g_free(obj->def);
   

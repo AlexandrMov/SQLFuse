@@ -80,6 +80,8 @@ struct sqlcmd {
 #define IS_TBLCMD(cmd) (cmd->mstype == R_C || cmd->mstype == R_D	\
 			|| cmd->mstype == R_PK || cmd->mstype == R_UQ	\
 			|| cmd->mstype == R_X || cmd->mstype == R_F)
+#define IS_MAYHAVE_RIGHTS(object) (IS_DIR(object) || IS_SCHOBJ(object)	\
+				   || object->type == R_COL)
 
 static struct sqlcache cache;
 static struct sqldeploy deploy;
@@ -823,7 +825,7 @@ static gpointer deploy_thread(gpointer data) {
 static void hotstart(GError **error)
 {
   GError *terr = NULL;
-  GList *wrk = NULL;
+  GList *wrk = NULL, *xls = NULL;
   GString *sql = g_string_new(NULL);
   g_mutex_lock(&cache.m);
 
@@ -837,7 +839,8 @@ static void hotstart(GError **error)
     g_string_append(sql, "CREATE TABLE #sch_objs (");
     g_string_append(sql, "dir_path NVARCHAR(MAX), obj_id INT");
     g_string_append(sql, ", obj_type NVARCHAR(5), ctime BIGINT");
-    g_string_append(sql, ", mtime BIGINT, def_len INT NULL )\n");
+    g_string_append(sql, ", mtime BIGINT, def_len INT NULL");
+    g_string_append(sql, ")\n");
 
     exec_sql_cmd(sql->str, ctx, &terr);
   }
@@ -850,6 +853,10 @@ static void hotstart(GError **error)
     if (terr == NULL)
       wrk = g_list_concat(wrk, fetch_table_obj(FALSE, FALSE, NULL, ctx, &terr));
 
+    // получить список расширенных атрибутов БД #41
+    if (terr == NULL)
+      xls = fetch_xattr_list(-1, FALSE, FALSE, ctx, &terr);
+    
     if (terr == NULL) {
       struct sqlfs_ms_obj *object = NULL;
       wrk = g_list_first(wrk);
@@ -861,13 +868,26 @@ static void hotstart(GError **error)
 	wrk = g_list_next(wrk);
       }
       g_list_free(wrk);
+
+      struct sqlfs_ms_acl *acl = NULL;
+      object = NULL;
+      xls = g_list_first(xls);
+      while(xls) {
+	acl = xls->data;
+	object = g_hash_table_lookup(cache.db_table, acl->path);
+	if (object) {
+	  object->acls = g_list_append(object->acls, acl);
+	}
+	xls = g_list_next(xls);
+      }
+      g_list_free(xls);
     }
     
   }
 
   if (terr == NULL) {
     g_string_truncate(sql, 0);
-    
+
     g_string_append(sql, "DROP TABLE #sch_objs\n");
     g_string_append(sql, "DROP TABLE #schemas");
     
@@ -1488,7 +1508,7 @@ GList * fetch_listxattr(const char *path, GError **error)
       break;
     }
 
-    if (!object->acls) {
+    if (IS_MAYHAVE_RIGHTS(object) && !object->acls ) {
       msctx_t *ctx = get_msctx(&terr);
 
       //список разрешений для объекта
