@@ -168,6 +168,7 @@ struct sqlfs_ms_obj {
 
   // список разрешений struct sqlfs_ms_acl
   GList *acls;
+  int is_loaded_acl; //<! 0 - права ещё не загружены; 1 - права загружены
   
   time_t ctime;
   time_t mtime;
@@ -207,8 +208,7 @@ GList * fetch_table_obj(int schema_id, int table_id, const char *name,
 
  * Список расширенных атрибутов объекта, включая разрешения
  */
-GList * fetch_xattr_list(int class_id, int major_id, int minor_id,
-			 msctx_t *ctx, GError **error);
+GList * fetch_xattr_list(int class_id, int major_id, msctx_t *ctx, GError **error);
 
 /*
  * Загрузить полный программный текст модуля

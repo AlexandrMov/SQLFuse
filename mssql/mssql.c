@@ -855,7 +855,7 @@ static void hotstart(GError **error)
 
     // получить список расширенных атрибутов БД #41
     if (terr == NULL)
-      xls = fetch_xattr_list(-1, FALSE, FALSE, ctx, &terr);
+      xls = fetch_xattr_list(-1, FALSE, ctx, &terr);
     
     if (terr == NULL) {
       struct sqlfs_ms_obj *object = NULL;
@@ -876,7 +876,23 @@ static void hotstart(GError **error)
 	acl = xls->data;
 	object = g_hash_table_lookup(cache.db_table, acl->path);
 	if (object) {
+	  gchar **tree = g_strsplit(g_path_skip_root(acl->path),
+				    G_DIR_SEPARATOR_S, -1);
+	  gchar *old = acl->path;
+	  if (g_strv_length(tree) == 3) {
+	    
+	    // для совместимости с "негорячим" режимом работы
+	    acl->path = g_strconcat("/", *(tree + 2), NULL);
+	  }
+	  else {
+	    acl->path = g_strdup("");
+	  }
+	  
 	  object->acls = g_list_append(object->acls, acl);
+	  object->is_loaded_acl = TRUE;
+	  
+	  g_strfreev(tree);
+	  g_free(old);
 	}
 	xls = g_list_next(xls);
       }
@@ -1508,14 +1524,47 @@ GList * fetch_listxattr(const char *path, GError **error)
       break;
     }
 
-    if (IS_MAYHAVE_RIGHTS(object) && !object->acls ) {
-      msctx_t *ctx = get_msctx(&terr);
+    if (IS_MAYHAVE_RIGHTS(object) && !object->acls) {
+      if (object->type != R_COL) {
+	msctx_t *ctx = get_msctx(&terr);
+	
+	//список разрешений для объекта
+	object->acls = fetch_xattr_list(class_id, major_id, ctx, &terr);
+	object->is_loaded_acl = TRUE;
+	
+	close_sql(ctx);
+      }
+      else {
+	gchar **schema = g_strsplit(g_path_skip_root(path),
+				    G_DIR_SEPARATOR_S, -1);
 
-      //список разрешений для объекта
-      object->acls = fetch_xattr_list(class_id, major_id, minor_id,
-				      ctx, &terr);
-    
-      close_sql(ctx);
+	gchar *tpath = g_strconcat("/", *(schema), "/", *(schema + 1), NULL);
+	struct sqlfs_ms_obj *ptable = find_cache_obj(tpath, &terr);
+
+	//загрузить права для таблицы впервые
+	if (terr == NULL && ptable && !ptable->is_loaded_acl) {
+	  msctx_t *ctx = get_msctx(&terr);
+	  ptable->acls = fetch_xattr_list(1, ptable->object_id, ctx, &terr);
+	  close_sql(ctx);
+	}
+	
+	if (terr == NULL) {
+	  GList *wrk = g_list_first(ptable->acls);
+	  struct sqlfs_ms_acl *acl = NULL;
+	  while (wrk) {
+	    acl = wrk->data;
+	    gchar *fpath = g_strconcat(tpath, acl->path, NULL);
+	    if (!g_strcmp0(fpath, path)) {
+	      object->acls = g_list_append(object->acls, acl);
+	    }
+	    wrk = g_list_next(wrk);
+	    g_free(fpath);
+	  }
+	}
+	
+	g_free(tpath);
+	g_strfreev(schema);
+      }
     }
 
     if (object->acls && terr == NULL) {
@@ -1523,10 +1572,14 @@ GList * fetch_listxattr(const char *path, GError **error)
       struct sqlfs_ms_acl *acl = NULL;
       while(wrk) {
 	acl = wrk->data;
-	gchar *str = g_strjoin(".", "user.sqlfuse.rights",
-			       acl->principal_name, acl->state, acl->type,
-			       NULL);
-	listx = g_list_append(listx, str);
+	if (object->type != R_COL && !strlen(acl->path)
+	    || object->type == R_COL) {
+	  gchar *str = g_strjoin(".", "user.sqlfuse.rights",
+				 acl->principal_name, acl->state, acl->type,
+				 NULL);
+	  listx = g_list_append(listx, str);
+	}
+	
 	wrk = g_list_next(wrk);
       }
     }
