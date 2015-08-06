@@ -42,6 +42,10 @@ SRC_FILES	+= $(addprefix $(MSSQL_PREFIX), $(MSSQL_FILES))
 OBJ_FILES	+= $(addprefix $(MSSQL_PREFIX), $(MSSQL_OBJS))
 MODULES		+= mssql
 
+# SCRIPTS
+SCRIPTS_PREFIX	:= ./scripts/
+SCRIPTS_FILES	:= config.py mksqldef.py
+SRC_FILES	+= $(addprefix $(SCRIPTS_PREFIX), $(SCRIPTS_FILES))
 
 CFLAGS 	+= -g -lsybdb $(shell pkg-config --cflags glib-2.0 fuse) -I.
 LDFLAGS += -g
@@ -60,12 +64,14 @@ clean:
 	rm -f $(OBJ_FILES)
 	rm -f $(addprefix $(MSSQL_PREFIX), $(MSSQL_GEN_FILES) *~)
 	rm -f $(addprefix $(KC_PREFIX), $(KC_OBJS) *~)
+	rm -f $(addprefix $(SCRIPTS_PREFIX), *~)
+	rm -rf $(addprefix $(SCRIPTS_PREFIX), __pycache__)
 	rm -f *~
 	rm -f *.d *.output
-	
+
 install:
 	install ./$(PROGRAM) /usr/bin
-	
+
 uninstall:
 	rm -rf /usr/bin/$(PROGRAM)
 
