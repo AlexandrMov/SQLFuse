@@ -20,12 +20,16 @@ class SqlTable(object):
     def __init__(self, path):
         self.path = path
         self.column_dict = dict()
+        
         self.defaults = dict()
-        self.mxl = 0
         self.cols = dict()
+        self.pk = []
+
+        self.mxl = 0
 
         for r in self.path.glob('*'):
             t = xattr.get(str(r), 'user.sqlfuse.type')
+
             if t == b'$L':
                 x = int(xattr.get(str(r), 'user.sqlfuse.column_id'))
                 self.column_dict[x] = r.name
@@ -35,6 +39,9 @@ class SqlTable(object):
                     m = re.search('DEFAULT\s+(.+)\s+FOR\s+\[(\S+)\]\s*$', s, re.I)
                     if m is not None:
                         self.defaults[m.group(2)] = (r.name, m.group(1))
+            elif t == b'PK':
+                with open(str(r), 'r') as f:
+                    self.pk = (r.name, f.read())
                 
         for c in sorted(self.column_dict.keys()):
             pn = str(self.path.joinpath(self.column_dict[c]))
@@ -55,7 +62,7 @@ class SqlTable(object):
 
     """
     Генерирование определения таблицы
-    `adjust` - отступ для колонок и ограничений `DEFAULT`
+    `adjust` - отступ для колонок и ограничений
     """
     def get_definition(self, adjust = 2):
         res = 'CREATE TABLE [{}].[{}] (\n'
@@ -69,6 +76,15 @@ class SqlTable(object):
             if df is not None:
                 res += df.rjust(len(df) + (self.mxl + adjust - len(cl) - 1))
 
+            res += ',\n'
+
+        if len(self.pk) > 0:
+            pkname, pkdef = self.pk[0], self.pk[1]
+            
+            pkname = 'CONSTRAINT [{}]'.format(pkname)
+            pkdef = pkdef.replace('CONSTRAINT', '{}').format(pkname)
+            res += pkdef.rjust(len(pkdef) + adjust)
+            
             res += ',\n'
 
         res = res[:-2] + '\n)'
